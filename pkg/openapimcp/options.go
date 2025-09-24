@@ -1,6 +1,8 @@
 package openapimcp
 
 import (
+	"net/http"
+
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/factory"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
@@ -9,6 +11,7 @@ import (
 
 type ServerOptions struct {
 	HTTPClient    executor.HTTPClient
+	HTTPConfig    *HTTPClientConfig
 	BaseURL       string
 	RouteMaps     []mapper.RouteMap
 	RouteMapFunc  mapper.RouteMapFunc
@@ -22,6 +25,7 @@ type ServerOptions struct {
 func defaultServerOptions() *ServerOptions {
 	return &ServerOptions{
 		HTTPClient:    executor.NewDefaultHTTPClient(),
+		HTTPConfig:    &HTTPClientConfig{Headers: make(http.Header)},
 		RouteMaps:     mapper.DefaultRouteMappings(),
 		ServerName:    "openapi-mcp-server",
 		ServerVersion: "1.0.0",
@@ -33,6 +37,12 @@ type ServerOption func(*ServerOptions)
 func WithHTTPClient(client executor.HTTPClient) ServerOption {
 	return func(opts *ServerOptions) {
 		opts.HTTPClient = client
+	}
+}
+
+func WithHTTPClientConfig(cfg *HTTPClientConfig) ServerOption {
+	return func(opts *ServerOptions) {
+		opts.HTTPConfig = cfg
 	}
 }
 

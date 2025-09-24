@@ -656,7 +656,7 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
     defer resp.Body.Close()
 
     // 5. Process response
-    processor := NewResponseProcessor(t.outputSchema, t.wrapResult)
+    processor := NewResponseProcessor(t.outputSchema, t.wrapResult, errorHandler)
     return processor.Process(resp)
 }
 ```

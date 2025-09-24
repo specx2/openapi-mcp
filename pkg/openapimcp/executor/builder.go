@@ -14,16 +14,39 @@ import (
 )
 
 type RequestBuilder struct {
-	route    ir.HTTPRoute
-	paramMap map[string]ir.ParamMapping
-	baseURL  string
+	route           ir.HTTPRoute
+	paramMap        map[string]ir.ParamMapping
+	baseURL         string
+	bodyContentType string
+	bodySchema      ir.Schema
 }
 
 func NewRequestBuilder(route ir.HTTPRoute, paramMap map[string]ir.ParamMapping, baseURL string) *RequestBuilder {
+	bodyContentType := ""
+	var bodySchema ir.Schema
+	if route.RequestBody != nil && len(route.RequestBody.ContentSchemas) > 0 {
+		for ct := range route.RequestBody.ContentSchemas {
+			// 选择首选的 JSON 类型，其次任意类型
+			if bodyContentType == "" || strings.Contains(ct, "json") {
+				bodyContentType = ct
+				bodySchema = route.RequestBody.ContentSchemas[ct]
+				if strings.Contains(ct, "json") {
+					break
+				}
+			}
+		}
+	}
+
+	if len(paramMap) == 0 && len(route.ParameterMap) > 0 {
+		paramMap = route.ParameterMap
+	}
+
 	return &RequestBuilder{
-		route:    route,
-		paramMap: paramMap,
-		baseURL:  baseURL,
+		route:           route,
+		paramMap:        paramMap,
+		baseURL:         baseURL,
+		bodyContentType: bodyContentType,
+		bodySchema:      bodySchema,
 	}
 }
 
@@ -31,26 +54,40 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 	pathParams := make(map[string]string)
 	queryParams := url.Values{}
 	headerParams := make(map[string]string)
+	cookieParams := make(map[string]string)
 	bodyParams := make(map[string]interface{})
 
 	for argName, argValue := range args {
 		mapping, ok := rb.paramMap[argName]
 		if !ok {
 			// 未显式映射的参数默认归入请求体，保持向后兼容
-			bodyParams[argName] = argValue
+			if argValue != nil {
+				bodyParams[argName] = argValue
+			}
 			continue
 		}
 
 		switch mapping.Location {
 		case ir.ParameterInPath:
-			pathParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
+			if argValue != nil {
+				pathParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
+			}
 		case ir.ParameterInQuery:
-			rb.addQueryParam(queryParams, mapping, argValue)
+			if argValue != nil {
+				rb.addQueryParam(queryParams, mapping, argValue)
+			}
 		case ir.ParameterInHeader:
-			headerParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
+			if argValue != nil {
+				headerParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
+			}
 		case ir.ParameterInCookie:
+			if argValue != nil {
+				cookieParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
+			}
 		case "body":
-			bodyParams[mapping.OpenAPIName] = argValue
+			if argValue != nil {
+				bodyParams[mapping.OpenAPIName] = argValue
+			}
 		}
 	}
 
@@ -59,7 +96,7 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 		return nil, err
 	}
 
-	bodyReader, err := rb.buildBody(bodyParams)
+	bodyReader, contentType, err := rb.buildBody(bodyParams)
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +106,16 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 		return nil, err
 	}
 
-	if len(bodyParams) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	for name, value := range headerParams {
 		req.Header.Set(name, value)
+	}
+
+	for name, value := range cookieParams {
+		req.AddCookie(&http.Cookie{Name: name, Value: value})
 	}
 
 	return req, nil
@@ -109,17 +150,26 @@ func (rb *RequestBuilder) buildURL(pathParams map[string]string, queryParams url
 	return parsedURL.String(), nil
 }
 
-func (rb *RequestBuilder) buildBody(bodyParams map[string]interface{}) (io.Reader, error) {
+func (rb *RequestBuilder) buildBody(bodyParams map[string]interface{}) (io.Reader, string, error) {
 	if len(bodyParams) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 
-	bodyJSON, err := json.Marshal(bodyParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	contentType := rb.bodyContentType
+	if contentType == "" {
+		contentType = "application/json"
 	}
 
-	return bytes.NewReader(bodyJSON), nil
+	// 如果请求体映射只有 body 字段且 schema 不是对象，则直接发送原始值
+	if len(bodyParams) == 1 {
+		if raw, ok := bodyParams["body"]; ok {
+			if rb.shouldUseRawBody() {
+				return rb.encodeBody(raw, contentType)
+			}
+		}
+	}
+
+	return rb.encodeBody(bodyParams, contentType)
 }
 
 func (rb *RequestBuilder) addQueryParam(params url.Values, mapping ir.ParamMapping, value interface{}) {
@@ -207,4 +257,45 @@ func (rb *RequestBuilder) toStringSlice(values []interface{}) []string {
 		result[i] = fmt.Sprintf("%v", v)
 	}
 	return result
+}
+
+func (rb *RequestBuilder) shouldUseRawBody() bool {
+	if rb.bodySchema == nil {
+		return true
+	}
+
+	if rb.bodySchema.Type() != "" && rb.bodySchema.Type() != "object" {
+		return true
+	}
+
+	if len(rb.bodySchema.Properties()) == 0 {
+		return true
+	}
+
+	return false
+}
+
+func (rb *RequestBuilder) encodeBody(body interface{}, contentType string) (io.Reader, string, error) {
+	switch {
+	case strings.Contains(contentType, "json"):
+		bodyJSON, err := json.Marshal(body)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		return bytes.NewReader(bodyJSON), contentType, nil
+	case strings.Contains(contentType, "x-www-form-urlencoded"):
+		values := url.Values{}
+		if formMap, ok := body.(map[string]interface{}); ok {
+			for key, v := range formMap {
+				values.Add(key, fmt.Sprintf("%v", v))
+			}
+		}
+		return strings.NewReader(values.Encode()), contentType, nil
+	default:
+		bodyJSON, err := json.Marshal(body)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		return bytes.NewReader(bodyJSON), contentType, nil
+	}
 }

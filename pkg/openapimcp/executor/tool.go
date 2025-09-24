@@ -102,6 +102,6 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 		return errorHandler.HandleHTTPError(err), nil
 	}
 
-	processor := NewResponseProcessor(t.outputSchema, t.wrapResult)
+	processor := NewResponseProcessor(t.outputSchema, t.wrapResult, errorHandler)
 	return processor.Process(resp)
 }

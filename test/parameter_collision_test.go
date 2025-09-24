@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
@@ -166,6 +167,58 @@ func TestRequestBuilderUsesParameterMappings(t *testing.T) {
 
 	if req.Header.Get("Content-Type") != "application/json" {
 		t.Fatalf("expected JSON content type, got %s", req.Header.Get("Content-Type"))
+	}
+}
+
+func TestRequestBuilderHandlesPrimitiveBody(t *testing.T) {
+	route := ir.HTTPRoute{
+		Path:   "/metrics",
+		Method: "POST",
+		RequestBody: &ir.RequestBodyInfo{
+			Required: true,
+			ContentSchemas: map[string]ir.Schema{
+				"application/json": {
+					"type": "number",
+				},
+			},
+		},
+	}
+
+	cf := factory.NewComponentFactory(&MockHTTPClient{}, "https://api.example.com")
+	tool, err := cf.CreateTool(route, nil)
+	if err != nil {
+		t.Fatalf("CreateTool failed: %v", err)
+	}
+
+	args := map[string]interface{}{
+		"body": 3.14,
+	}
+
+	reqBuilder := executor.NewRequestBuilder(route, tool.ParameterMappings(), "https://api.example.com")
+	req, err := reqBuilder.Build(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if req.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("expected JSON content type, got %s", req.Header.Get("Content-Type"))
+	}
+
+	if req.URL.Path != "/metrics" {
+		t.Fatalf("unexpected request path %s", req.URL.Path)
+	}
+
+	if req.Body == nil {
+		t.Fatal("expected non-nil body")
+	}
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+
+	if string(bodyBytes) != "3.14" {
+		t.Fatalf("expected raw body '3.14', got %s", string(bodyBytes))
 	}
 }
 

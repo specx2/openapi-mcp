@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -34,27 +36,20 @@ func NewErrorHandler(logLevel string) *ErrorHandler {
 // HandleHTTPError 处理 HTTP 错误
 func (eh *ErrorHandler) HandleHTTPError(err error) *mcp.CallToolResult {
 	if httpErr, ok := err.(*HTTPError); ok {
-		errorMessage := fmt.Sprintf("HTTP %d: %s", httpErr.StatusCode, httpErr.Message)
-
-		// 添加响应体信息（如果存在）
-		if httpErr.Body != "" {
-			errorMessage += fmt.Sprintf(" - %s", httpErr.Body)
-		}
-
-		return &mcp.CallToolResult{
-			IsError: true,
-			Content: []mcp.Content{
-				mcp.NewTextContent(errorMessage),
-			},
-		}
+		return eh.HandleHTTPStatus(httpErr.StatusCode, httpErr.Message, []byte(httpErr.Body))
 	}
 
-	// 处理其他类型的错误
+	retryable := IsRetryableError(err)
+	message := fmt.Sprintf("Request failed: %s", err.Error())
+	structured := map[string]interface{}{
+		"error":     err.Error(),
+		"retryable": retryable,
+	}
+
 	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{
-			mcp.NewTextContent("Request failed: " + err.Error()),
-		},
+		IsError:           true,
+		Content:           []mcp.Content{mcp.NewTextContent(message)},
+		StructuredContent: structured,
 	}
 }
 
@@ -98,9 +93,62 @@ func (eh *ErrorHandler) HandleResponseError(err error) *mcp.CallToolResult {
 	}
 }
 
+// HandleHTTPResponse 将 HTTP 响应转换为 MCP 错误结果
+func (eh *ErrorHandler) HandleHTTPResponse(resp *http.Response, body []byte) *mcp.CallToolResult {
+	statusText := strings.TrimSpace(resp.Status)
+	if statusText == "" {
+		statusText = http.StatusText(resp.StatusCode)
+	}
+	return eh.HandleHTTPStatus(resp.StatusCode, statusText, body)
+}
+
+// HandleHTTPStatus 处理带状态码与响应体的错误信息
+func (eh *ErrorHandler) HandleHTTPStatus(statusCode int, statusText string, body []byte) *mcp.CallToolResult {
+	if statusText == "" {
+		statusText = getStatusMessage(statusCode)
+	}
+
+	message := fmt.Sprintf("HTTP %d: %s", statusCode, statusText)
+	structured := map[string]interface{}{
+		"status":    statusCode,
+		"reason":    statusText,
+		"retryable": statusCode >= 500 || statusCode == http.StatusTooManyRequests || statusCode == http.StatusRequestTimeout,
+	}
+
+	if len(body) > 0 {
+		trimmed := strings.TrimSpace(string(body))
+		if json.Valid(body) {
+			var jsonBody interface{}
+			if err := json.Unmarshal(body, &jsonBody); err == nil {
+				structured["body"] = jsonBody
+				if pretty, err := formatJSON(body); err == nil {
+					message += fmt.Sprintf(" - %s", pretty)
+				} else if trimmed != "" {
+					message += fmt.Sprintf(" - %s", trimmed)
+				}
+			} else if trimmed != "" {
+				structured["body"] = trimmed
+				message += fmt.Sprintf(" - %s", trimmed)
+			}
+		} else if trimmed != "" {
+			structured["body"] = trimmed
+			message += fmt.Sprintf(" - %s", trimmed)
+		}
+	}
+
+	return &mcp.CallToolResult{
+		IsError:           true,
+		Content:           []mcp.Content{mcp.NewTextContent(message)},
+		StructuredContent: structured,
+	}
+}
+
 // CreateHTTPError 从 HTTP 响应创建错误
 func CreateHTTPError(statusCode int, body string) *HTTPError {
-	message := getStatusMessage(statusCode)
+	message := http.StatusText(statusCode)
+	if message == "" {
+		message = getStatusMessage(statusCode)
+	}
 
 	return &HTTPError{
 		StatusCode: statusCode,
@@ -119,6 +167,14 @@ func getStatusMessage(statusCode int) string {
 	default:
 		return http.StatusText(statusCode)
 	}
+}
+
+func formatJSON(data []byte) (string, error) {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, data, "", "  "); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // IsRetryableError 判断错误是否可重试

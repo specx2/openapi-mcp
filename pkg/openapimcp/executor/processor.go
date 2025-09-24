@@ -13,12 +13,14 @@ import (
 type ResponseProcessor struct {
 	outputSchema ir.Schema
 	wrapResult   bool
+	errorHandler *ErrorHandler
 }
 
-func NewResponseProcessor(outputSchema ir.Schema, wrapResult bool) *ResponseProcessor {
+func NewResponseProcessor(outputSchema ir.Schema, wrapResult bool, errorHandler *ErrorHandler) *ResponseProcessor {
 	return &ResponseProcessor{
 		outputSchema: outputSchema,
 		wrapResult:   wrapResult,
+		errorHandler: errorHandler,
 	}
 }
 
@@ -71,12 +73,19 @@ func (rp *ResponseProcessor) processJSON(result interface{}) (*mcp.CallToolResul
 func (rp *ResponseProcessor) processError(resp *http.Response) (*mcp.CallToolResult, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if rp.errorHandler != nil {
+			return rp.errorHandler.HandleHTTPStatus(resp.StatusCode, resp.Status, nil), nil
+		}
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{
 				mcp.NewTextContent(fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)),
 			},
 		}, nil
+	}
+
+	if rp.errorHandler != nil {
+		return rp.errorHandler.HandleHTTPResponse(resp, body), nil
 	}
 
 	var errorData map[string]interface{}

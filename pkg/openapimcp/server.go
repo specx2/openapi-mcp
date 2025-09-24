@@ -3,6 +3,7 @@ package openapimcp
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -21,6 +22,37 @@ type Server struct {
 	options   *ServerOptions
 }
 
+func prepareHTTPClient(opts *ServerOptions) (executor.HTTPClient, *HTTPClientConfig) {
+	client, ok := opts.HTTPClient.(*executor.DefaultHTTPClient)
+	config := opts.HTTPConfig
+	if !ok {
+		if config == nil {
+			return opts.HTTPClient, &HTTPClientConfig{Headers: make(http.Header)}
+		}
+		if config.Headers == nil {
+			config.Headers = make(http.Header)
+		}
+		return opts.HTTPClient, config
+	}
+
+	if config == nil {
+		config = &HTTPClientConfig{Headers: make(http.Header)}
+	} else {
+		if config.Headers == nil {
+			config.Headers = make(http.Header)
+		}
+	}
+
+	if config.Timeout > 0 {
+		client.WithTimeout(config.Timeout)
+	}
+	if len(config.Headers) > 0 {
+		client.WithHeaders(config.Headers)
+	}
+
+	return client, config
+}
+
 func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 	options := defaultServerOptions()
 	for _, opt := range opts {
@@ -35,6 +67,12 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 	routes, err := p.ParseSpec(spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse spec: %w", err)
+	}
+
+	client, clientConfig := prepareHTTPClient(options)
+	options.HTTPClient = client
+	if clientConfig != nil && options.BaseURL == "" && clientConfig.BaseURL != "" {
+		options.BaseURL = clientConfig.BaseURL
 	}
 
 	m := mapper.NewRouteMapper(options.RouteMaps)
