@@ -83,3 +83,45 @@ func TestNewServerUsesClientConfigBaseURL(t *testing.T) {
 		t.Fatalf("expected header to persist on server client")
 	}
 }
+
+func TestExtractParametersFromURI(t *testing.T) {
+	params := extractParametersFromURI(
+		"resource://orders/123/items/456",
+		"resource://orders/{orderId}/items/{itemId}",
+	)
+
+	expected := map[string]string{"orderId": "123", "itemId": "456"}
+	if len(params) != len(expected) {
+		t.Fatalf("expected %d parameters, got %#v", len(expected), params)
+	}
+	for key, value := range expected {
+		if params[key] != value {
+			t.Fatalf("expected %s=%s, got %s", key, value, params[key])
+		}
+	}
+}
+
+func TestExtractParametersFromURIHandlesEncoding(t *testing.T) {
+	params := extractParametersFromURI(
+		"resource://files/report%202024/version/1",
+		"resource://files/{name}/version/{version}",
+	)
+
+	if params["name"] != "report 2024" {
+		t.Fatalf("expected decoded value, got %q", params["name"])
+	}
+	if params["version"] != "1" {
+		t.Fatalf("expected version to be 1, got %q", params["version"])
+	}
+}
+
+func TestExtractParametersFromURIMismatchSegments(t *testing.T) {
+	params := extractParametersFromURI(
+		"resource://users/123",
+		"resource://users/{id}/profile",
+	)
+
+	if len(params) != 0 {
+		t.Fatalf("expected no parameters for mismatched segments, got %#v", params)
+	}
+}

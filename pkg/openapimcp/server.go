@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -195,5 +197,52 @@ func (s *Server) MCPServer() *server.MCPServer {
 }
 
 func extractParametersFromURI(uri, template string) map[string]string {
-	return make(map[string]string)
+	params := make(map[string]string)
+
+	clean := func(value string) []string {
+		if value == "" {
+			return nil
+		}
+
+		if idx := strings.IndexAny(value, "?#"); idx >= 0 {
+			value = value[:idx]
+		}
+
+		value = strings.TrimPrefix(value, "resource://")
+		value = strings.Trim(value, "/")
+		if value == "" {
+			return nil
+		}
+		return strings.Split(value, "/")
+	}
+
+	actualSegments := clean(uri)
+	templateSegments := clean(template)
+	if len(actualSegments) == 0 || len(templateSegments) == 0 {
+		return params
+	}
+
+	if len(actualSegments) != len(templateSegments) {
+		return params
+	}
+
+	for idx, segment := range templateSegments {
+		if len(segment) < 2 || segment[0] != '{' || segment[len(segment)-1] != '}' {
+			continue
+		}
+
+		name := strings.TrimSpace(segment[1 : len(segment)-1])
+		if name == "" {
+			continue
+		}
+
+		value, err := url.PathUnescape(actualSegments[idx])
+		if err != nil {
+			value = actualSegments[idx]
+		}
+
+		params[name] = value
+	}
+
+	return params
 }

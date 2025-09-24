@@ -133,12 +133,19 @@ func (p *OpenAPI30Parser) convertRequestBody(requestBody *v3.RequestBody) *ir.Re
 		Required:       requestBody.Required != nil && *requestBody.Required,
 		Description:    requestBody.Description,
 		ContentSchemas: make(map[string]ir.Schema),
+		Encodings:      make(map[string]map[string]ir.EncodingInfo),
 	}
 
 	if requestBody.Content != nil {
 		for mediaType, mediaTypeObj := range requestBody.Content.FromOldest() {
-			if mediaTypeObj != nil && mediaTypeObj.Schema != nil {
+			if mediaTypeObj == nil {
+				continue
+			}
+			if mediaTypeObj.Schema != nil {
 				info.ContentSchemas[mediaType] = p.convertSchema(mediaTypeObj.Schema.Schema())
+			}
+			if encodings := convertEncodings(mediaTypeObj.Encoding); len(encodings) > 0 {
+				info.Encodings[mediaType] = encodings
 			}
 		}
 	}

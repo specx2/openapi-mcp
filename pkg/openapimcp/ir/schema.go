@@ -26,6 +26,9 @@ func (s Schema) Properties() map[string]Schema {
 }
 
 func (s Schema) Required() []string {
+	if req, ok := s["required"].([]string); ok {
+		return append([]string(nil), req...)
+	}
 	if req, ok := s["required"].([]interface{}); ok {
 		result := make([]string, 0, len(req))
 		for _, r := range req {

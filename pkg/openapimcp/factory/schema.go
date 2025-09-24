@@ -2,7 +2,9 @@ package factory
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
@@ -23,7 +25,7 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 			continue
 		}
 
-		schemaCopy := cloneSchema(param.Schema)
+		schemaCopy := normalizeSchema(param.Schema)
 		if !param.Required {
 			schemaCopy = makeOptionalNullable(schemaCopy)
 		}
@@ -53,22 +55,23 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 		if contentType != "" {
 			bodySchema := route.RequestBody.ContentSchemas[contentType]
 			if bodySchema != nil {
-				properties := bodySchema.Properties()
+				normalizedBody := normalizeSchema(bodySchema)
+				properties := normalizedBody.Properties()
 				if len(properties) == 0 {
-					// 非对象请求体：将整个 body 暴露为单一字段
-					schema["properties"].(map[string]interface{})["body"] = cloneSchema(bodySchema)
-					paramMap["body"] = ir.ParamMapping{
-						OpenAPIName:  "body",
+					propName := determineBodyPropertyName(normalizedBody)
+					schema["properties"].(map[string]interface{})[propName] = normalizedBody
+					paramMap[propName] = ir.ParamMapping{
+						OpenAPIName:  propName,
 						Location:     "body",
 						IsSuffixed:   false,
-						OriginalName: "body",
+						OriginalName: propName,
 					}
 					if route.RequestBody.Required {
-						required = append(required, "body")
+						required = append(required, propName)
 					}
 				} else {
 					for propName, propSchema := range properties {
-						schema["properties"].(map[string]interface{})[propName] = cloneSchema(propSchema)
+						schema["properties"].(map[string]interface{})[propName] = normalizeSchema(propSchema)
 						paramMap[propName] = ir.ParamMapping{
 							OpenAPIName:  propName,
 							Location:     "body",
@@ -78,7 +81,7 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 					}
 
 					if route.RequestBody.Required {
-						for _, prop := range bodySchema.Required() {
+						for _, prop := range normalizedBody.Required() {
 							required = append(required, prop)
 						}
 					}
@@ -116,10 +119,10 @@ func (cf *ComponentFactory) collectBodyProperties(route ir.HTTPRoute) map[string
 		return bodyProps
 	}
 
-	properties := bodySchema.Properties()
+	properties := normalizeSchema(bodySchema).Properties()
 	if len(properties) == 0 {
-		// 对于非对象请求体，使用占位字段名 "body"
-		bodyProps["body"] = true
+		propName := determineBodyPropertyName(bodySchema)
+		bodyProps[propName] = true
 		return bodyProps
 	}
 
@@ -291,6 +294,110 @@ func collectRefsInto(value interface{}, refs map[string]struct{}) {
 			collectRefsInto(item, refs)
 		}
 	}
+}
+
+func normalizeSchema(schema ir.Schema) ir.Schema {
+	cloned := cloneSchema(schema)
+	cloned = mergeAllOf(cloned)
+	return cloned
+}
+
+func mergeAllOf(schema ir.Schema) ir.Schema {
+	allOf, ok := schema["allOf"].([]interface{})
+	if !ok {
+		return schema
+	}
+
+	combinedProps := make(map[string]interface{})
+	var combinedRequired []string
+
+	for _, item := range allOf {
+		sub := toSchema(item)
+		sub = mergeAllOf(sub)
+
+		if props, ok := sub["properties"].(map[string]interface{}); ok {
+			for k, v := range props {
+				combinedProps[k] = v
+			}
+		}
+
+		if req, ok := toStringSlice(sub["required"]); ok {
+			combinedRequired = append(combinedRequired, req...)
+		}
+
+		for key, val := range sub {
+			if key == "properties" || key == "required" || key == "allOf" {
+				continue
+			}
+			if _, exists := schema[key]; !exists {
+				schema[key] = val
+			}
+		}
+	}
+
+	if len(combinedProps) > 0 {
+		if existing, ok := schema["properties"].(map[string]interface{}); ok {
+			for k, v := range existing {
+				combinedProps[k] = v
+			}
+		}
+		schema["properties"] = combinedProps
+	}
+
+	if len(combinedRequired) > 0 {
+		schema["required"] = deduplicate(combinedRequired)
+	}
+
+	delete(schema, "allOf")
+	return schema
+}
+
+func toSchema(value interface{}) ir.Schema {
+	switch v := value.(type) {
+	case ir.Schema:
+		return cloneSchema(v)
+	case map[string]interface{}:
+		return cloneSchema(v)
+	default:
+		return ir.Schema{}
+	}
+}
+
+func toStringSlice(value interface{}) ([]string, bool) {
+	if value == nil {
+		return nil, false
+	}
+	switch v := value.(type) {
+	case []string:
+		return v, true
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result, true
+	default:
+		return nil, false
+	}
+}
+
+var nonWord = regexp.MustCompile(`[^a-zA-Z0-9_]`)
+
+func determineBodyPropertyName(schema ir.Schema) string {
+	if title, ok := schema["title"].(string); ok && strings.TrimSpace(title) != "" {
+		name := strings.ToLower(nonWord.ReplaceAllString(strings.TrimSpace(title), "_"))
+		name = strings.Trim(name, "_")
+		if name == "" {
+			return "body"
+		}
+		if firstRune := []rune(name)[0]; unicode.IsDigit(firstRune) {
+			return "body_" + name
+		}
+		return name
+	}
+	return "body"
 }
 
 func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, bool) {

@@ -5,17 +5,20 @@
 - 确保请求体字段不会被丢弃：`RequestBuilder` 现在对未映射的字段自动归入请求体，同时保留显式的 `body` 映射，解决 Cursor 版本导致请求体为空的问题。参见 `pkg/openapimcp/executor/builder.go`。
 - 支持非对象请求体与内容类型：当 OpenAPI 描述的 `requestBody` 不是对象时，使用 `body` 字段映射并按内容类型编码（JSON / x-www-form-urlencoded），同时在构建请求时自动设置 `Content-Type`。参见 `pkg/openapimcp/factory/schema.go`、`pkg/openapimcp/executor/builder.go`。
 - 查询参数与 Cookie 序列化增强：统一通过 `ParamMapping` 处理 `deepObject`、`spaceDelimited`、`pipeDelimited`、`explode=false` 等样式，并补充 Cookie 写入；新测试覆盖路径替换、深度对象、原始体写入。参见 `pkg/openapimcp/executor/builder.go`、`test/parameter_collision_test.go`。
+- 必填路径参数保障与表单兼容性：`RequestBuilder` 会在构建前检测所有必填路径参数是否提供，同时针对单字段 `multipart/form-data` 与 `application/x-www-form-urlencoded` 场景保持结构化编码，避免误判为原始体。参见 `pkg/openapimcp/executor/builder.go`、`test/parameter_collision_test.go`。
 - 错误处理对齐 fastmcp：`ResponseProcessor` 与 `ErrorHandler` 现会解析 HTTP 状态码、格式化 JSON 错误体并返回结构化内容，同时区分网络错误的可重试性。参见 `pkg/openapimcp/executor/processor.go`、`pkg/openapimcp/executor/error_handler.go`、`pkg/openapimcp/executor/error_handler_test.go`。
 - Schema 合并增强：可选参数自动允许 `null`、请求体/参数均使用深拷贝，且 `$defs` 仅保留实际引用的定义，避免多余 schema 噪音。参见 `pkg/openapimcp/factory/schema.go`、`pkg/openapimcp/factory/schema_test.go`。
+- 复合 schema 支持：`allOf` 会被展开合并，`required` 与属性集正确汇总，非对象请求体可根据 `title` 自动命名字段，与 fastmcp 的 `_combine_schemas_and_map_params` 行为保持一致。参见同上。
 - HTTP 客户端配置：新增 `HTTPClientConfig`，构建 `Server` 时可注入 BaseURL、默认 Headers 与 Timeout，并在 `DefaultHTTPClient` 内统一应用。参见 `pkg/openapimcp/options.go`、`pkg/openapimcp/server.go`、`pkg/openapimcp/executor/client.go`、`pkg/openapimcp/server_client_test.go`。
 - 暴露 `OpenAPITool.ParameterMappings()` 便于调试与测试。
 - 新增覆盖测试 `test/parameter_collision_test.go`，验证参数冲突、无冲突场景以及构建出的 HTTP 请求（路径替换、深度对象序列化和请求体写入）。
 - 移除误提交的可执行二进制 `improved_usage` 并写入 `.gitignore`，保持仓库整洁。
 - 更新示例 `examples/improved_usage/main.go` 使能力说明与实际实现一致。
+- 资源模板参数解析：实现 URI 与模板之间的反向映射，使 `resource_template` 能根据调用 URI 自动填充路径参数，匹配 fastmcp 行为。参见 `pkg/openapimcp/server.go`、`pkg/openapimcp/server_client_test.go`。
 
 ## 与 fastmcp 的主要差距
 对照 `/tmp/fastmcp/src/fastmcp/experimental/server/openapi` 及其 utilities：
-1. **请求构建能力**：fastmcp 使用 `RequestDirector` 与 openapi-core 生成 HTTP 请求，自动处理参数风格、`requestBody` 组合、`nullable` 等复杂场景。Go 版本仍依赖手写 `RequestBuilder`，无法解析 `allOf` / `oneOf`、多内容类型、`encoding` 或 cookie/headers 参数。建议：移植一个 `RequestDirector` 风格的组件，或在现有 `RequestBuilder` 中补齐这些分支逻辑。
+1. **请求构建能力**：fastmcp 使用 `RequestDirector` 与 openapi-core 生成 HTTP 请求，自动处理多内容类型、`encoding`、oneOf/anyOf 等复杂场景。Go 版本虽然已支持 `allOf` 展开与基础序列化，但仍缺少多 content-type、encoding、深层组合等特性。建议继续扩展 `RequestBuilder` 或引入更通用的指挥器组件。
 2. **错误处理**：✅ 已对齐。`ErrorHandler` 现在会解析 HTTP 状态、格式化 JSON 错误体并区分可重试错误，行为与 fastmcp `OpenAPITool.run` 中的处理一致。
 3. **Schema 处理**：基本可空化与 `$defs` 剪裁已实现，仍需覆盖 `allOf/oneOf` 合并、复杂 `$ref`（含外部引用）与 nullable 转换的剩余边界场景，可继续对齐 fastmcp `_combine_schemas_and_map_params` 的完整行为。
 4. **超时与客户端设置**：✅ 已对齐。可通过 `WithHTTPClient` / `WithHTTPClientConfig` 注入自定义 `http.Client`、默认 Headers、超时与 BaseURL，`DefaultHTTPClient` 会自动附加这些配置。

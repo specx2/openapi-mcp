@@ -116,3 +116,114 @@ func TestCombineSchemasPrunesDefinitions(t *testing.T) {
 		t.Fatalf("did not expect Unused definition to be present")
 	}
 }
+
+func TestCombineSchemasMergesAllOf(t *testing.T) {
+	cf := NewComponentFactory(nil, "")
+
+	route := ir.HTTPRoute{
+		RequestBody: &ir.RequestBodyInfo{
+			ContentSchemas: map[string]ir.Schema{
+				"application/json": {
+					"allOf": []interface{}{
+						map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"first": map[string]interface{}{"type": "string"},
+							},
+							"required": []interface{}{"first"},
+						},
+						map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"second": map[string]interface{}{"type": "integer"},
+							},
+						},
+					},
+				},
+			},
+			Required: true,
+		},
+	}
+
+	schema, _, err := cf.combineSchemas(route)
+	if err != nil {
+		t.Fatalf("combineSchemas returned error: %v", err)
+	}
+
+	props := extractProperties(t, schema["properties"])
+	if _, ok := props["first"]; !ok {
+		t.Fatalf("expected first property")
+	}
+	if _, ok := props["second"]; !ok {
+		t.Fatalf("expected second property")
+	}
+
+	req := extractRequired(t, schema["required"])
+	if len(req) != 1 || req[0] != "first" {
+		t.Fatalf("expected required to contain first, got %v", req)
+	}
+}
+
+func TestDetermineBodyPropertyNameFromTitle(t *testing.T) {
+	cf := NewComponentFactory(nil, "")
+
+	route := ir.HTTPRoute{
+		RequestBody: &ir.RequestBodyInfo{
+			ContentSchemas: map[string]ir.Schema{
+				"application/json": {
+					"title": "Payload Data",
+					"type":  "string",
+				},
+			},
+		},
+	}
+
+	schema, paramMap, err := cf.combineSchemas(route)
+	if err != nil {
+		t.Fatalf("combineSchemas returned error: %v", err)
+	}
+
+	props := extractProperties(t, schema["properties"])
+	if _, ok := props["payload_data"]; !ok {
+		t.Fatalf("expected payload_data property, got keys %v", props)
+	}
+
+	if _, ok := paramMap["payload_data"]; !ok {
+		t.Fatalf("expected payload_data mapping")
+	}
+}
+
+func extractProperties(t *testing.T, value interface{}) map[string]interface{} {
+	t.Helper()
+	switch v := value.(type) {
+	case map[string]interface{}:
+		return v
+	case ir.Schema:
+		return map[string]interface{}(v)
+	default:
+		t.Fatalf("unexpected properties type %T", value)
+		return nil
+	}
+}
+
+func extractRequired(t *testing.T, value interface{}) []string {
+	t.Helper()
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	default:
+		t.Fatalf("unexpected required type %T", value)
+		return nil
+	}
+}

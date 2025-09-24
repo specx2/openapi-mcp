@@ -9,6 +9,8 @@
 - `pkg/openapimcp/executor/parameter_serializer.go`：实现未被调用，实际序列化逻辑仍旧不足。
 - 根目录意外提交 `improved_usage` 可执行文件，污染仓库。
 - `examples/improved_usage/main.go` 声明的部分能力（错误处理、完整序列化）与实际代码不符。
+- `pkg/openapimcp/server.go`：`extractParametersFromURI` 为空实现，`resource_template` 无法解析 URI 中的路径参数，导致模板资源与 fastmcp 行为不一致。
+- `pkg/openapimcp/executor/builder.go`：缺少必填路径参数校验，且在 multipart/form-data / x-www-form-urlencoded 仅包含单字段时误判为原始体，破坏 fastmcp 的表单兼容性。
 
 ## 修复摘要
 - 恢复并增强 `combineSchemas` -> 现返回 schema 与完整 `ParamMapping`，同时持久化到 `OpenAPITool`，解决请求体丢失与冲突处理问题。
@@ -16,5 +18,7 @@
 - 扩展查询参数序列化逻辑以支持 `deepObject`、`spaceDelimited`、`pipeDelimited` 等样式。
 - 重写参数冲突测试，覆盖工厂建模与请求构建全流程。
 - 删除误提交二进制并更新 `.gitignore`，调整示例文案以反映真实能力。
+- 实现资源模板 URI 参数反解析，补齐 `resource_template` 按 URI 提取路径参数的能力。
+- 为请求构建补充必填路径参数校验，并在表单/Multipart 单字段场景保持结构化编码，避免误降级为原始体。
 
 以上修正均已在 `OPTIMIZE.md` 中记录，后续优化方向亦已列出。
