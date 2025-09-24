@@ -68,6 +68,15 @@ func (t *OpenAPITool) SetTool(tool mcp.Tool) {
 	t.tool = tool
 }
 
+// ParameterMappings 返回公开的参数名称到 OpenAPI 参数的映射，主要用于测试和调试。
+func (t *OpenAPITool) ParameterMappings() map[string]ir.ParamMapping {
+	result := make(map[string]ir.ParamMapping, len(t.paramMap))
+	for k, v := range t.paramMap {
+		result[k] = v
+	}
+	return result
+}
+
 func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	errorHandler := NewErrorHandler("info")
 
@@ -76,14 +85,8 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 		return errorHandler.HandleParseError(err), nil
 	}
 
-	// 映射参数名称
-	mappedArgs, err := t.MapParameters(args)
-	if err != nil {
-		return errorHandler.HandleValidationError(err), nil
-	}
-
 	builder := NewRequestBuilder(t.route, t.paramMap, t.baseURL)
-	httpReq, err := builder.Build(ctx, mappedArgs)
+	httpReq, err := builder.Build(ctx, args)
 	if err != nil {
 		return errorHandler.HandleBuildError(err), nil
 	}
@@ -101,25 +104,4 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 
 	processor := NewResponseProcessor(t.outputSchema, t.wrapResult)
 	return processor.Process(resp)
-}
-
-// MapParameters 将 MCP 参数名称映射回 OpenAPI 参数名称
-func (t *OpenAPITool) MapParameters(args map[string]interface{}) (map[string]interface{}, error) {
-	mapped := make(map[string]interface{})
-
-	for paramName, value := range args {
-		if mapping, exists := t.paramMap[paramName]; exists {
-			if mapping.IsSuffixed {
-				// 使用原始名称进行实际请求
-				mapped[mapping.OpenAPIName] = value
-			} else {
-				mapped[paramName] = value
-			}
-		} else {
-			// 未映射的参数（可能是请求体属性）
-			mapped[paramName] = value
-		}
-	}
-
-	return mapped, nil
 }

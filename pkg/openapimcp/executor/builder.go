@@ -36,6 +36,8 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 	for argName, argValue := range args {
 		mapping, ok := rb.paramMap[argName]
 		if !ok {
+			// 未显式映射的参数默认归入请求体，保持向后兼容
+			bodyParams[argName] = argValue
 			continue
 		}
 
@@ -43,7 +45,7 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 		case ir.ParameterInPath:
 			pathParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
 		case ir.ParameterInQuery:
-			rb.addQueryParam(queryParams, mapping.OpenAPIName, argValue)
+			rb.addQueryParam(queryParams, mapping, argValue)
 		case ir.ParameterInHeader:
 			headerParams[mapping.OpenAPIName] = fmt.Sprintf("%v", argValue)
 		case ir.ParameterInCookie:
@@ -120,14 +122,9 @@ func (rb *RequestBuilder) buildBody(bodyParams map[string]interface{}) (io.Reade
 	return bytes.NewReader(bodyJSON), nil
 }
 
-func (rb *RequestBuilder) addQueryParam(params url.Values, name string, value interface{}) {
-	var paramInfo *ir.ParameterInfo
-	for i := range rb.route.Parameters {
-		if rb.route.Parameters[i].Name == name && rb.route.Parameters[i].In == ir.ParameterInQuery {
-			paramInfo = &rb.route.Parameters[i]
-			break
-		}
-	}
+func (rb *RequestBuilder) addQueryParam(params url.Values, mapping ir.ParamMapping, value interface{}) {
+	name := mapping.OpenAPIName
+	paramInfo := rb.findParameterInfo(name, ir.ParameterInQuery)
 
 	switch v := value.(type) {
 	case []interface{}:
@@ -140,6 +137,17 @@ func (rb *RequestBuilder) addQueryParam(params url.Values, name string, value in
 }
 
 func (rb *RequestBuilder) addArrayParam(params url.Values, name string, values []interface{}, info *ir.ParameterInfo) {
+	if info != nil {
+		switch info.Style {
+		case "spaceDelimited":
+			params.Add(name, strings.Join(rb.toStringSlice(values), " "))
+			return
+		case "pipeDelimited":
+			params.Add(name, strings.Join(rb.toStringSlice(values), "|"))
+			return
+		}
+	}
+
 	explode := true
 	if info != nil && info.Explode != nil {
 		explode = *info.Explode
@@ -164,8 +172,39 @@ func (rb *RequestBuilder) addObjectParam(params url.Values, name string, obj map
 			params.Add(fmt.Sprintf("%s[%s]", name, key), fmt.Sprintf("%v", value))
 		}
 	} else {
-		for key, value := range obj {
-			params.Add(key, fmt.Sprintf("%v", value))
+		explode := true
+		if info != nil && info.Explode != nil {
+			explode = *info.Explode
+		}
+
+		if explode {
+			for key, value := range obj {
+				params.Add(key, fmt.Sprintf("%v", value))
+			}
+		} else {
+			pairs := make([]string, 0, len(obj)*2)
+			for key, value := range obj {
+				pairs = append(pairs, fmt.Sprintf("%s,%v", key, value))
+			}
+			params.Add(name, strings.Join(pairs, ","))
 		}
 	}
+}
+
+func (rb *RequestBuilder) findParameterInfo(name string, location string) *ir.ParameterInfo {
+	for i := range rb.route.Parameters {
+		param := &rb.route.Parameters[i]
+		if param.Name == name && param.In == location {
+			return param
+		}
+	}
+	return nil
+}
+
+func (rb *RequestBuilder) toStringSlice(values []interface{}) []string {
+	result := make([]string, len(values))
+	for i, v := range values {
+		result[i] = fmt.Sprintf("%v", v)
+	}
+	return result
 }

@@ -15,6 +15,10 @@ func (s Schema) Properties() map[string]Schema {
 		for k, v := range p {
 			if schema, ok := v.(map[string]interface{}); ok {
 				props[k] = schema
+				continue
+			}
+			if nested, ok := v.(Schema); ok {
+				props[k] = nested
 			}
 		}
 	}

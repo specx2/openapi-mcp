@@ -179,23 +179,16 @@ func main() {
 	log.Printf("📋 Server Info: %s v%s", "user-management-mcp", "1.0.0")
 
 	// 展示改进后的功能
-	log.Println("\n🚀 改进后的功能特性:")
+	log.Println("\n🚀 当前可用的改进特性:")
 	log.Println("1. ✅ 参数冲突自动处理")
-	log.Println("   - 路径参数 'id' 和请求体属性 'id' 冲突")
-	log.Println("   - 系统自动为路径参数添加 '__path' 后缀")
-	log.Println("   - 查询参数 'id' 添加 '__query' 后缀")
+	log.Println("   - 路径参数与请求体属性重名时自动添加位置后缀")
+	log.Println("   - MCP 输入结构清晰区分 '__path'、'__query' 参数")
 
-	log.Println("\n2. ✅ 增强的错误处理")
-	log.Println("   - 结构化的错误分类")
-	log.Println("   - 详细的错误信息和上下文")
-	log.Println("   - 支持重试逻辑判断")
+	log.Println("\n2. ✅ 查询参数序列化增强")
+	log.Println("   - 支持 deepObject 数组/对象的展开序列化")
+	log.Println("   - 支持 form、spaceDelimited、pipeDelimited 等样式")
 
-	log.Println("\n3. ✅ 完整的参数序列化")
-	log.Println("   - 支持多种 OpenAPI 参数样式")
-	log.Println("   - 正确的 explode/implode 行为")
-	log.Println("   - 数组参数的正确处理")
-
-	log.Println("\n4. ✅ 智能路由映射")
+	log.Println("\n3. ✅ 智能路由映射")
 	log.Println("   - GET 请求映射为 Resource")
 	log.Println("   - 其他 HTTP 方法映射为 Tool")
 	log.Println("   - 自定义组件命名支持")
@@ -225,5 +218,5 @@ func main() {
 	log.Println("\n资源访问:")
 	log.Println(`  resource://get_all_users?limit=10&tags=admin&tags=premium`)
 
-	log.Println("\n✨ 这些改进使您的项目达到了与 fastmcp 相当的功能水平！")
+	log.Println("\n✨ 更多与 fastmcp 对齐的能力仍在逐步完善中，欢迎继续扩展！")
 }

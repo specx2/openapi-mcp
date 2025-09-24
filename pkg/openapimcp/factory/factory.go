@@ -1,8 +1,6 @@
 package factory
 
 import (
-	"fmt"
-
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
@@ -69,10 +67,7 @@ func (cf *ComponentFactory) CreateComponents(mappedRoutes []mapper.MappedRoute) 
 }
 
 func (cf *ComponentFactory) CreateTool(route ir.HTTPRoute, tags []string) (*executor.OpenAPITool, error) {
-	// 检测参数冲突并生成映射
-	paramMap := cf.DetectParameterCollisions(route)
-
-	inputSchema, err := cf.combineSchemas(route, paramMap)
+	inputSchema, paramMap, err := cf.combineSchemas(route)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +77,9 @@ func (cf *ComponentFactory) CreateTool(route ir.HTTPRoute, tags []string) (*exec
 	name := cf.generateName(route, "tool")
 
 	description := cf.formatDescription(route)
+
+	// Persist parameter map on the route for downstream consumers (parity with fastmcp)
+	route.ParameterMap = paramMap
 
 	tool := executor.NewOpenAPITool(
 		name,
@@ -138,57 +136,4 @@ func (cf *ComponentFactory) CreateResourceTemplate(route ir.HTTPRoute, tags []st
 	}
 
 	return template, nil
-}
-
-// DetectParameterCollisions 检测参数名冲突并生成参数映射
-func (cf *ComponentFactory) DetectParameterCollisions(route ir.HTTPRoute) map[string]ir.ParamMapping {
-	paramMap := make(map[string]ir.ParamMapping)
-
-	// 提取请求体属性名
-	bodyProps := cf.extractBodyProperties(route)
-
-	// 处理路径、查询、头部参数
-	for _, param := range route.Parameters {
-		if bodyProps[param.Name] {
-			// 参数冲突，添加位置后缀
-			suffixedName := fmt.Sprintf("%s__%s", param.Name, param.In)
-			paramMap[suffixedName] = ir.ParamMapping{
-				OpenAPIName:  param.Name,
-				Location:     param.In,
-				IsSuffixed:   true,
-				OriginalName: param.Name,
-			}
-		} else {
-			// 无冲突，使用原始名称
-			paramMap[param.Name] = ir.ParamMapping{
-				OpenAPIName:  param.Name,
-				Location:     param.In,
-				IsSuffixed:   false,
-				OriginalName: param.Name,
-			}
-		}
-	}
-
-	return paramMap
-}
-
-// extractBodyProperties 提取请求体属性名集合
-func (cf *ComponentFactory) extractBodyProperties(route ir.HTTPRoute) map[string]bool {
-	bodyProps := make(map[string]bool)
-
-	if route.RequestBody != nil && route.RequestBody.ContentSchemas != nil {
-		// 获取第一个内容类型的 schema
-		for _, schema := range route.RequestBody.ContentSchemas {
-			if schema != nil && schema["properties"] != nil {
-				if props, ok := schema["properties"].(map[string]interface{}); ok {
-					for propName := range props {
-						bodyProps[propName] = true
-					}
-				}
-			}
-			break // 只处理第一个内容类型
-		}
-	}
-
-	return bodyProps
 }

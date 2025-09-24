@@ -1,7 +1,9 @@
 package test
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
@@ -9,19 +11,18 @@ import (
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 )
 
-// MockHTTPClient 用于测试
+// MockHTTPClient provides a minimal implementation for tool execution tests.
 type MockHTTPClient struct{}
 
 func (m *MockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	// 返回一个模拟的 HTTP 响应
 	return &http.Response{
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
 		Status:     "200 OK",
+		Body:       http.NoBody,
 	}, nil
 }
 
-func TestParameterCollisionDetection(t *testing.T) {
-	// 创建测试用的 HTTPRoute，包含参数冲突
+func TestCreateToolParameterCollisions(t *testing.T) {
 	route := ir.HTTPRoute{
 		Path:        "/users/{id}",
 		Method:      "PUT",
@@ -29,13 +30,13 @@ func TestParameterCollisionDetection(t *testing.T) {
 		Parameters: []ir.ParameterInfo{
 			{
 				Name:     "id",
-				In:       "path",
+				In:       ir.ParameterInPath,
 				Required: true,
 				Schema:   ir.Schema{"type": "integer"},
 			},
 			{
 				Name:     "id",
-				In:       "query",
+				In:       ir.ParameterInQuery,
 				Required: false,
 				Schema:   ir.Schema{"type": "integer"},
 			},
@@ -49,207 +50,125 @@ func TestParameterCollisionDetection(t *testing.T) {
 						"id":   ir.Schema{"type": "integer"},
 						"name": ir.Schema{"type": "string"},
 					},
-					"required": []string{"name"},
+					"required": []interface{}{"name"},
 				},
 			},
 		},
 	}
 
-	// 创建 ComponentFactory
-	mockClient := &MockHTTPClient{}
-	cf := factory.NewComponentFactory(mockClient, "https://api.example.com")
-
-	// 测试参数冲突检测
-	paramMap := cf.DetectParameterCollisions(route)
-
-	// 验证结果
-	expectedMappings := map[string]ir.ParamMapping{
-		"id__path": {
-			OpenAPIName:  "id",
-			Location:     "path",
-			IsSuffixed:   true,
-			OriginalName: "id",
-		},
-		"id__query": {
-			OpenAPIName:  "id",
-			Location:     "query",
-			IsSuffixed:   true,
-			OriginalName: "id",
-		},
+	cf := factory.NewComponentFactory(&MockHTTPClient{}, "https://api.example.com")
+	tool, err := cf.CreateTool(route, nil)
+	if err != nil {
+		t.Fatalf("CreateTool failed: %v", err)
 	}
 
-	for expectedName, expectedMapping := range expectedMappings {
-		if mapping, exists := paramMap[expectedName]; !exists {
-			t.Errorf("Expected parameter mapping for %s not found", expectedName)
-		} else {
-			if mapping.OpenAPIName != expectedMapping.OpenAPIName {
-				t.Errorf("Expected OpenAPIName %s, got %s", expectedMapping.OpenAPIName, mapping.OpenAPIName)
-			}
-			if mapping.Location != expectedMapping.Location {
-				t.Errorf("Expected Location %s, got %s", expectedMapping.Location, mapping.Location)
-			}
-			if mapping.IsSuffixed != expectedMapping.IsSuffixed {
-				t.Errorf("Expected IsSuffixed %v, got %v", expectedMapping.IsSuffixed, mapping.IsSuffixed)
-			}
-		}
+	mappings := tool.ParameterMappings()
+
+	if mapping, ok := mappings["id__path"]; !ok || !mapping.IsSuffixed || mapping.Location != ir.ParameterInPath {
+		t.Fatalf("expected suffixed path parameter mapping, got %#v", mapping)
 	}
 
-	// 验证请求体属性没有被映射（因为它们不冲突）
-	if _, exists := paramMap["name"]; exists {
-		t.Error("Request body property 'name' should not be in parameter map")
+	if mapping, ok := mappings["id__query"]; !ok || !mapping.IsSuffixed || mapping.Location != ir.ParameterInQuery {
+		t.Fatalf("expected suffixed query parameter mapping, got %#v", mapping)
 	}
+
+	if mapping, ok := mappings["name"]; !ok || mapping.Location != "body" {
+		t.Fatalf("expected body mapping for name, got %#v", mapping)
+	}
+
 }
 
-func TestNoParameterCollision(t *testing.T) {
-	// 创建没有参数冲突的 HTTPRoute
+func TestCreateToolWithoutCollisions(t *testing.T) {
 	route := ir.HTTPRoute{
 		Path:        "/users/{userId}",
-		Method:      "POST",
-		OperationID: "createUser",
+		Method:      "GET",
+		OperationID: "getUser",
 		Parameters: []ir.ParameterInfo{
 			{
 				Name:     "userId",
-				In:       "path",
+				In:       ir.ParameterInPath,
 				Required: true,
 				Schema:   ir.Schema{"type": "integer"},
 			},
 			{
-				Name:     "limit",
-				In:       "query",
+				Name:     "tags",
+				In:       ir.ParameterInQuery,
 				Required: false,
-				Schema:   ir.Schema{"type": "integer"},
-			},
-		},
-		RequestBody: &ir.RequestBodyInfo{
-			Required: true,
-			ContentSchemas: map[string]ir.Schema{
-				"application/json": {
-					"type": "object",
-					"properties": map[string]interface{}{
-						"name":  ir.Schema{"type": "string"},
-						"email": ir.Schema{"type": "string"},
-					},
-				},
+				Schema:   ir.Schema{"type": "array", "items": map[string]interface{}{"type": "string"}},
+				Style:    "form",
+				Explode:  boolPtr(true),
 			},
 		},
 	}
 
-	mockClient := &MockHTTPClient{}
-	cf := factory.NewComponentFactory(mockClient, "https://api.example.com")
-
-	paramMap := cf.DetectParameterCollisions(route)
-
-	// 验证没有后缀的参数映射
-	expectedMappings := map[string]ir.ParamMapping{
-		"userId": {
-			OpenAPIName:  "userId",
-			Location:     "path",
-			IsSuffixed:   false,
-			OriginalName: "userId",
-		},
-		"limit": {
-			OpenAPIName:  "limit",
-			Location:     "query",
-			IsSuffixed:   false,
-			OriginalName: "limit",
-		},
+	cf := factory.NewComponentFactory(&MockHTTPClient{}, "https://api.example.com")
+	tool, err := cf.CreateTool(route, nil)
+	if err != nil {
+		t.Fatalf("CreateTool failed: %v", err)
 	}
 
-	for expectedName, expectedMapping := range expectedMappings {
-		if mapping, exists := paramMap[expectedName]; !exists {
-			t.Errorf("Expected parameter mapping for %s not found", expectedName)
-		} else {
-			if mapping.IsSuffixed {
-				t.Errorf("Parameter %s should not be suffixed", expectedName)
-			}
-			// 验证其他属性
-			if mapping.OpenAPIName != expectedMapping.OpenAPIName {
-				t.Errorf("Expected OpenAPIName %s, got %s", expectedMapping.OpenAPIName, mapping.OpenAPIName)
-			}
-			if mapping.Location != expectedMapping.Location {
-				t.Errorf("Expected Location %s, got %s", expectedMapping.Location, mapping.Location)
-			}
-		}
+	mappings := tool.ParameterMappings()
+	if mapping, ok := mappings["userId"]; !ok || mapping.IsSuffixed {
+		t.Fatalf("unexpected suffix for userId mapping: %#v", mapping)
+	}
+	if _, ok := mappings["tags"]; !ok {
+		t.Fatalf("expected mapping for tags query parameter")
 	}
 }
 
-func TestParameterMappingInTool(t *testing.T) {
-	// 创建带有参数冲突的 OpenAPITool
+func TestRequestBuilderUsesParameterMappings(t *testing.T) {
 	route := ir.HTTPRoute{
-		Path:        "/users/{id}",
-		Method:      "PUT",
-		OperationID: "updateUser",
+		Path:   "/users/{id}",
+		Method: "POST",
 		Parameters: []ir.ParameterInfo{
-			{
-				Name:     "id",
-				In:       "path",
-				Required: true,
-				Schema:   ir.Schema{"type": "integer"},
-			},
+			{Name: "id", In: ir.ParameterInPath, Required: true, Schema: ir.Schema{"type": "integer"}},
+			{Name: "filter", In: ir.ParameterInQuery, Schema: ir.Schema{"type": "object"}, Style: "deepObject", Explode: boolPtr(true)},
 		},
 		RequestBody: &ir.RequestBodyInfo{
-			Required: true,
 			ContentSchemas: map[string]ir.Schema{
 				"application/json": {
 					"type": "object",
 					"properties": map[string]interface{}{
-						"id":   ir.Schema{"type": "integer"},
 						"name": ir.Schema{"type": "string"},
 					},
+					"required": []interface{}{"name"},
 				},
 			},
 		},
 	}
 
-	paramMap := map[string]ir.ParamMapping{
-		"id__path": {
-			OpenAPIName:  "id",
-			Location:     "path",
-			IsSuffixed:   true,
-			OriginalName: "id",
-		},
-		"name": {
-			OpenAPIName:  "name",
-			Location:     "body",
-			IsSuffixed:   false,
-			OriginalName: "name",
-		},
-	}
-
-	mockClient := &MockHTTPClient{}
-	tool := executor.NewOpenAPITool(
-		"updateUser",
-		"Update user",
-		ir.Schema{},
-		nil,
-		false,
-		route,
-		mockClient,
-		"https://api.example.com",
-		paramMap,
-	)
-
-	// 测试参数映射
-	args := map[string]interface{}{
-		"id__path": 123,
-		"name":     "John Doe",
-	}
-
-	mappedArgs, err := tool.MapParameters(args)
+	cf := factory.NewComponentFactory(&MockHTTPClient{}, "https://api.example.com")
+	tool, err := cf.CreateTool(route, nil)
 	if err != nil {
-		t.Fatalf("Failed to map parameters: %v", err)
+		t.Fatalf("CreateTool failed: %v", err)
 	}
 
-	// 验证映射结果
-	if mappedArgs["id"] != 123 {
-		t.Errorf("Expected id=123, got %v", mappedArgs["id"])
-	}
-	if mappedArgs["name"] != "John Doe" {
-		t.Errorf("Expected name='John Doe', got %v", mappedArgs["name"])
+	args := map[string]interface{}{
+		"id":     float64(42), // JSON numbers decode as float64
+		"filter": map[string]interface{}{"status": "active"},
+		"name":   "Jane",
 	}
 
-	// 验证后缀参数不存在于映射结果中
-	if _, exists := mappedArgs["id__path"]; exists {
-		t.Error("Suffixed parameter 'id__path' should not be in mapped args")
+	reqBuilder := executor.NewRequestBuilder(route, tool.ParameterMappings(), "https://api.example.com")
+	req, err := reqBuilder.Build(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
 	}
+
+	if req.URL.Path != "/users/42" {
+		t.Fatalf("expected path substitution, got %s", req.URL.Path)
+	}
+
+	values, _ := url.ParseQuery(req.URL.RawQuery)
+	if values.Get("filter[status]") != "active" {
+		t.Fatalf("expected deepObject serialization, got %s", req.URL.RawQuery)
+	}
+
+	if req.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("expected JSON content type, got %s", req.Header.Get("Content-Type"))
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

@@ -1,46 +1,73 @@
 package factory
 
 import (
+	"fmt"
+
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
 )
 
-func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute, paramMap map[string]ir.ParamMapping) (ir.Schema, error) {
+func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[string]ir.ParamMapping, error) {
 	schema := ir.Schema{
 		"type":       "object",
 		"properties": make(map[string]interface{}),
 	}
 
 	var required []string
+	paramMap := make(map[string]ir.ParamMapping)
+	bodyProps := cf.collectBodyProperties(route)
 
-	// 处理参数（使用参数映射）
-	for mcpName, mapping := range paramMap {
-		if mapping.Location != "body" {
-			schema["properties"].(map[string]interface{})[mcpName] = cf.getParameterSchema(route, mapping.OpenAPIName)
+	for _, param := range route.Parameters {
+		if param.Schema == nil {
+			continue
+		}
 
-			if cf.isParameterRequired(route, mapping.OpenAPIName) {
-				required = append(required, mcpName)
-			}
+		argName := param.Name
+		if bodyProps[param.Name] {
+			argName = fmt.Sprintf("%s__%s", param.Name, param.In)
+		}
+
+		schemaProps := schema["properties"].(map[string]interface{})
+		schemaProps[argName] = param.Schema
+
+		if param.Required {
+			required = append(required, argName)
+		}
+
+		paramMap[argName] = ir.ParamMapping{
+			OpenAPIName:  param.Name,
+			Location:     param.In,
+			IsSuffixed:   argName != param.Name,
+			OriginalName: param.Name,
 		}
 	}
 
-	// 处理请求体属性
 	if route.RequestBody != nil {
 		contentType := parser.GetContentType(route.RequestBody.ContentSchemas)
 		if contentType != "" {
 			bodySchema := route.RequestBody.ContentSchemas[contentType]
+			if bodySchema != nil {
+				for propName, propSchema := range bodySchema.Properties() {
+					schema["properties"].(map[string]interface{})[propName] = propSchema
+					paramMap[propName] = ir.ParamMapping{
+						OpenAPIName:  propName,
+						Location:     "body",
+						IsSuffixed:   false,
+						OriginalName: propName,
+					}
+				}
 
-			for propName, propSchema := range bodySchema.Properties() {
-				schema["properties"].(map[string]interface{})[propName] = propSchema
-
-				if route.RequestBody.Required && cf.isPropertyRequired(bodySchema, propName) {
-					required = append(required, propName)
+				if route.RequestBody.Required {
+					for _, prop := range bodySchema.Required() {
+						required = append(required, prop)
+					}
 				}
 			}
 		}
 	}
 
 	if len(required) > 0 {
+		required = deduplicate(required)
 		schema["required"] = required
 	}
 
@@ -48,39 +75,44 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute, paramMap map[stri
 		schema["$defs"] = route.SchemaDefs.Definitions()
 	}
 
-	return schema, nil
+	return schema, paramMap, nil
 }
 
-// getParameterSchema 获取参数的 schema
-func (cf *ComponentFactory) getParameterSchema(route ir.HTTPRoute, paramName string) ir.Schema {
-	for _, param := range route.Parameters {
-		if param.Name == paramName {
-			return param.Schema
-		}
+func (cf *ComponentFactory) collectBodyProperties(route ir.HTTPRoute) map[string]bool {
+	bodyProps := make(map[string]bool)
+
+	if route.RequestBody == nil {
+		return bodyProps
 	}
-	return nil
+
+	contentType := parser.GetContentType(route.RequestBody.ContentSchemas)
+	if contentType == "" {
+		return bodyProps
+	}
+
+	bodySchema := route.RequestBody.ContentSchemas[contentType]
+	if bodySchema == nil {
+		return bodyProps
+	}
+
+	for propName := range bodySchema.Properties() {
+		bodyProps[propName] = true
+	}
+
+	return bodyProps
 }
 
-// isParameterRequired 检查参数是否必需
-func (cf *ComponentFactory) isParameterRequired(route ir.HTTPRoute, paramName string) bool {
-	for _, param := range route.Parameters {
-		if param.Name == paramName {
-			return param.Required
+func deduplicate(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
 		}
+		seen[value] = struct{}{}
+		result = append(result, value)
 	}
-	return false
-}
-
-// isPropertyRequired 检查属性是否必需
-func (cf *ComponentFactory) isPropertyRequired(schema ir.Schema, propName string) bool {
-	if required, ok := schema["required"].([]string); ok {
-		for _, req := range required {
-			if req == propName {
-				return true
-			}
-		}
-	}
-	return false
+	return result
 }
 
 func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, bool) {
