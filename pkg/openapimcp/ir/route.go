@@ -17,7 +17,8 @@ type HTTPRoute struct {
 }
 
 type ParamMapping struct {
-	OpenAPIName string
-	Location    string
-	IsSuffixed  bool
+	OpenAPIName  string
+	Location     string
+	IsSuffixed   bool
+	OriginalName string // 原始参数名
 }
