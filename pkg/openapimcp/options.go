@@ -15,6 +15,7 @@ type ServerOptions struct {
 	BaseURL       string
 	RouteMaps     []mapper.RouteMap
 	RouteMapFunc  mapper.RouteMapFunc
+	GlobalTags    []string
 	CustomNames   map[string]string
 	ComponentFunc factory.ComponentFunc
 	Parser        parser.OpenAPIParser
@@ -61,6 +62,12 @@ func WithRouteMaps(maps []mapper.RouteMap) ServerOption {
 func WithRouteMapFunc(fn mapper.RouteMapFunc) ServerOption {
 	return func(opts *ServerOptions) {
 		opts.RouteMapFunc = fn
+	}
+}
+
+func WithGlobalTags(tags ...string) ServerOption {
+	return func(opts *ServerOptions) {
+		opts.GlobalTags = tags
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 )
 
@@ -14,13 +15,19 @@ type ResponseProcessor struct {
 	outputSchema ir.Schema
 	wrapResult   bool
 	errorHandler *ErrorHandler
+	validator    *jsonschema.Schema
 }
 
 func NewResponseProcessor(outputSchema ir.Schema, wrapResult bool, errorHandler *ErrorHandler) *ResponseProcessor {
+	var validator *jsonschema.Schema
+	if outputSchema != nil {
+		validator = compileIRSchema(outputSchema)
+	}
 	return &ResponseProcessor{
 		outputSchema: outputSchema,
 		wrapResult:   wrapResult,
 		errorHandler: errorHandler,
+		validator:    validator,
 	}
 }
 
@@ -49,25 +56,33 @@ func (rp *ResponseProcessor) Process(resp *http.Response) (*mcp.CallToolResult, 
 }
 
 func (rp *ResponseProcessor) processJSON(result interface{}) (*mcp.CallToolResult, error) {
-	if rp.wrapResult {
-		return &mcp.CallToolResult{
-			StructuredContent: map[string]interface{}{
-				"result": result,
-			},
-		}, nil
+	structured := rp.prepareStructuredResult(result)
+	if rp.validator != nil {
+		if err := rp.validator.Validate(structured); err != nil {
+			if rp.errorHandler != nil {
+				return rp.errorHandler.HandleResponseValidationError(err), nil
+			}
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{
+					mcp.NewTextContent("Response validation failed: " + err.Error()),
+				},
+			}, nil
+		}
 	}
-
-	if resultMap, ok := result.(map[string]interface{}); ok {
-		return &mcp.CallToolResult{
-			StructuredContent: resultMap,
-		}, nil
-	}
-
 	return &mcp.CallToolResult{
-		StructuredContent: map[string]interface{}{
-			"result": result,
-		},
+		StructuredContent: structured,
 	}, nil
+}
+
+func (rp *ResponseProcessor) prepareStructuredResult(result interface{}) map[string]interface{} {
+	if rp.wrapResult {
+		return map[string]interface{}{ "result": result }
+	}
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		return resultMap
+	}
+	return map[string]interface{}{ "result": result }
 }
 
 func (rp *ResponseProcessor) processError(resp *http.Response) (*mcp.CallToolResult, error) {

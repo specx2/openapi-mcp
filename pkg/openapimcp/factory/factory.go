@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
@@ -26,7 +27,7 @@ func NewComponentFactory(client executor.HTTPClient, baseURL string) *ComponentF
 }
 
 func (cf *ComponentFactory) WithCustomNames(names map[string]string) *ComponentFactory {
-	cf.customNames = names
+	cf.customNames = normalizeCustomNames(names)
 	return cf
 }
 
@@ -41,21 +42,21 @@ func (cf *ComponentFactory) CreateComponents(mappedRoutes []mapper.MappedRoute) 
 	for _, mapped := range mappedRoutes {
 		switch mapped.MCPType {
 		case mapper.MCPTypeTool:
-			tool, err := cf.CreateTool(mapped.Route, mapped.MCPTags)
+			tool, err := cf.CreateTool(mapped.Route, mapped.Tags, mapped.Annotations)
 			if err != nil {
 				return nil, err
 			}
 			components = append(components, tool)
 
 		case mapper.MCPTypeResource:
-			resource, err := cf.CreateResource(mapped.Route, mapped.MCPTags)
+			resource, err := cf.CreateResource(mapped.Route, mapped.Tags)
 			if err != nil {
 				return nil, err
 			}
 			components = append(components, resource)
 
 		case mapper.MCPTypeResourceTemplate:
-			template, err := cf.CreateResourceTemplate(mapped.Route, mapped.MCPTags)
+			template, err := cf.CreateResourceTemplate(mapped.Route, mapped.Tags)
 			if err != nil {
 				return nil, err
 			}
@@ -66,7 +67,7 @@ func (cf *ComponentFactory) CreateComponents(mappedRoutes []mapper.MappedRoute) 
 	return components, nil
 }
 
-func (cf *ComponentFactory) CreateTool(route ir.HTTPRoute, tags []string) (*executor.OpenAPITool, error) {
+func (cf *ComponentFactory) CreateTool(route ir.HTTPRoute, tags []string, annotations *mcp.ToolAnnotation) (*executor.OpenAPITool, error) {
 	inputSchema, paramMap, err := cf.combineSchemas(route)
 	if err != nil {
 		return nil, err
@@ -91,6 +92,8 @@ func (cf *ComponentFactory) CreateTool(route ir.HTTPRoute, tags []string) (*exec
 		cf.client,
 		cf.baseURL,
 		paramMap,
+		tags,
+		annotations,
 	)
 
 	if cf.componentFn != nil {

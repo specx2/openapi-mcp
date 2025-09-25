@@ -14,6 +14,7 @@ type HTTPRoute struct {
 	Extensions     map[string]interface{}
 	OpenAPIVersion string
 	ParameterMap   map[string]ParamMapping
+	Callbacks      []CallbackInfo
 }
 
 type ParamMapping struct {

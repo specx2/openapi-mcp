@@ -3,8 +3,11 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/internal"
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 )
@@ -17,6 +20,8 @@ type OpenAPITool struct {
 	paramMap     map[string]ir.ParamMapping
 	outputSchema ir.Schema
 	wrapResult   bool
+	validator    *jsonschema.Schema
+	tags         []string
 }
 
 func NewOpenAPITool(
@@ -29,6 +34,8 @@ func NewOpenAPITool(
 	client HTTPClient,
 	baseURL string,
 	paramMap map[string]ir.ParamMapping,
+	tags []string,
+	annotations *mcp.ToolAnnotation,
 ) *OpenAPITool {
 	inputSchemaJSON, _ := json.Marshal(inputSchema)
 	var outputSchemaJSON json.RawMessage
@@ -36,18 +43,24 @@ func NewOpenAPITool(
 		outputSchemaJSON, _ = json.Marshal(outputSchema)
 	}
 
-	tool := mcp.NewTool(name,
+	options := []mcp.ToolOption{
 		mcp.WithDescription(description),
 		mcp.WithRawInputSchema(inputSchemaJSON),
-	)
-
-	if outputSchema != nil {
-		tool = mcp.NewTool(name,
-			mcp.WithDescription(description),
-			mcp.WithRawInputSchema(inputSchemaJSON),
-			mcp.WithRawOutputSchema(outputSchemaJSON),
-		)
 	}
+	if outputSchema != nil {
+		options = append(options, mcp.WithRawOutputSchema(outputSchemaJSON))
+	}
+	if derived := deriveToolAnnotations(route.Method, route.Summary, annotations); derived != nil {
+		options = append(options, mcp.WithToolAnnotation(*derived))
+	}
+
+	tool := mcp.NewTool(name, options...)
+
+	if meta := buildToolMeta(route, tags); len(meta) > 0 {
+		tool.Meta = mcp.NewMetaFromMap(meta)
+	}
+
+	validator := compileJSONSchema(inputSchemaJSON)
 
 	return &OpenAPITool{
 		tool:         tool,
@@ -57,6 +70,8 @@ func NewOpenAPITool(
 		paramMap:     paramMap,
 		outputSchema: outputSchema,
 		wrapResult:   wrapResult,
+		validator:    validator,
+		tags:         uniqueStrings(tags),
 	}
 }
 
@@ -77,12 +92,25 @@ func (t *OpenAPITool) ParameterMappings() map[string]ir.ParamMapping {
 	return result
 }
 
+func (t *OpenAPITool) Tags() []string {
+	if len(t.tags) == 0 {
+		return nil
+	}
+	copyTags := make([]string, len(t.tags))
+	copy(copyTags, t.tags)
+	return copyTags
+}
+
 func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	errorHandler := NewErrorHandler("info")
 
 	args, err := internal.ParseArguments(request)
 	if err != nil {
 		return errorHandler.HandleParseError(err), nil
+	}
+
+	if err := t.validateArgs(args); err != nil {
+		return errorHandler.HandleBuildError(err), nil
 	}
 
 	builder := NewRequestBuilder(t.route, t.paramMap, t.baseURL)
@@ -104,4 +132,287 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 
 	processor := NewResponseProcessor(t.outputSchema, t.wrapResult, errorHandler)
 	return processor.Process(resp)
+}
+
+func (t *OpenAPITool) validateArgs(args map[string]interface{}) error {
+	if t.validator == nil {
+		return nil
+	}
+	if err := t.validator.Validate(args); err != nil {
+		return fmt.Errorf("argument validation failed: %w", err)
+	}
+	return nil
+}
+
+func buildToolMeta(route ir.HTTPRoute, tags []string) map[string]any {
+	meta := make(map[string]any)
+	openapiMeta := make(map[string]any)
+
+	if route.OperationID != "" {
+		openapiMeta["operationId"] = route.OperationID
+	}
+	if route.Method != "" {
+		openapiMeta["method"] = route.Method
+	}
+	if route.Path != "" {
+		openapiMeta["path"] = route.Path
+	}
+	if len(route.Tags) > 0 {
+		openapiMeta["tags"] = uniqueStrings(route.Tags)
+	}
+	if len(route.Extensions) > 0 {
+		openapiMeta["extensions"] = route.Extensions
+	}
+
+	if route.RequestBody != nil {
+		openapiMeta["requestBody"] = summarizeRequestBody(*route.RequestBody)
+	}
+
+	if len(route.Callbacks) > 0 {
+		openapiMeta["callbacks"] = summarizeCallbacks(route.Callbacks)
+	}
+
+	if len(openapiMeta) == 0 {
+		return addMetaTags(meta, tags)
+	}
+
+	meta["openapi"] = openapiMeta
+	return addMetaTags(meta, tags)
+}
+
+func addMetaTags(meta map[string]any, tags []string) map[string]any {
+	combined := uniqueStrings(tags)
+	if len(combined) == 0 {
+		return meta
+	}
+	if meta == nil {
+		meta = make(map[string]any)
+	}
+	if existing, ok := meta["tags"].([]string); ok {
+		meta["tags"] = uniqueStrings(append(existing, combined...))
+	} else {
+		meta["tags"] = combined
+	}
+	return meta
+}
+
+func deriveToolAnnotations(method, summary string, override *mcp.ToolAnnotation) *mcp.ToolAnnotation {
+	if override != nil {
+		clone := *override
+		return &clone
+	}
+	switch strings.ToUpper(method) {
+	case "GET", "HEAD":
+		return annotationFor(boolPtr(true), boolPtr(false), boolPtr(true), boolPtr(true), summary)
+	case "PUT":
+		return annotationFor(boolPtr(false), boolPtr(true), boolPtr(true), boolPtr(true), summary)
+	case "DELETE":
+		return annotationFor(boolPtr(false), boolPtr(true), boolPtr(true), boolPtr(true), summary)
+	default:
+		return nil
+	}
+}
+
+func annotationFor(readOnly, destructive, idempotent, openWorld *bool, summary string) *mcp.ToolAnnotation {
+	annotation := mcp.ToolAnnotation{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   openWorld,
+	}
+	if summary != "" {
+		annotation.Title = summary
+	}
+	return &annotation
+}
+
+func boolPtr(v bool) *bool {
+	value := v
+	return &value
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func summarizeRequestBody(body ir.RequestBodyInfo) map[string]any {
+	result := map[string]any{
+		"required": body.Required,
+	}
+	if len(body.Extensions) > 0 {
+		result["extensions"] = body.Extensions
+	}
+	content := make(map[string]any)
+	for mediaType := range body.ContentSchemas {
+		mediaMeta := make(map[string]any)
+		if body.MediaDefaults != nil {
+			if def, ok := body.MediaDefaults[mediaType]; ok {
+				mediaMeta["default"] = def
+			}
+		}
+		if body.MediaExamples != nil {
+			if example, ok := body.MediaExamples[mediaType]; ok {
+				mediaMeta["example"] = example
+			}
+		}
+		if body.MediaExampleSets != nil {
+			if examples, ok := body.MediaExampleSets[mediaType]; ok {
+				mediaMeta["examples"] = examples
+			}
+		}
+		if body.MediaExtensions != nil {
+			if exts, ok := body.MediaExtensions[mediaType]; ok {
+				mediaMeta["extensions"] = exts
+			}
+		}
+		if encodings := body.Encodings[mediaType]; len(encodings) > 0 {
+			mediaMeta["encodings"] = summarizeEncodings(encodings)
+		}
+		if len(mediaMeta) > 0 {
+			content[mediaType] = mediaMeta
+		}
+	}
+	if len(content) > 0 {
+		result["content"] = content
+	}
+	return result
+}
+
+func summarizeCallbacks(callbacks []ir.CallbackInfo) []map[string]any {
+	if len(callbacks) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(callbacks))
+	for _, cb := range callbacks {
+		entry := make(map[string]any)
+		if cb.Name != "" {
+			entry["name"] = cb.Name
+		}
+		if cb.Expression != "" {
+			entry["expression"] = cb.Expression
+		}
+		if len(cb.Extensions) > 0 {
+			entry["extensions"] = cb.Extensions
+		}
+		if len(cb.Operations) > 0 {
+			ops := make([]map[string]any, 0, len(cb.Operations))
+			for _, op := range cb.Operations {
+				opEntry := map[string]any{"method": op.Method}
+				if op.Summary != "" {
+					opEntry["summary"] = op.Summary
+				}
+				if op.Description != "" {
+					opEntry["description"] = op.Description
+				}
+				if op.RequestBody != nil {
+					opEntry["requestBody"] = summarizeRequestBody(*op.RequestBody)
+				}
+				if len(op.Responses) > 0 {
+					opEntry["responses"] = op.Responses
+				}
+				if len(op.Extensions) > 0 {
+					opEntry["extensions"] = op.Extensions
+				}
+				ops = append(ops, opEntry)
+			}
+			entry["operations"] = ops
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func summarizeEncodings(encodings map[string]ir.EncodingInfo) map[string]any {
+	result := make(map[string]any)
+	for name, encoding := range encodings {
+		encodingMeta := make(map[string]any)
+		if encoding.ContentType != "" {
+			encodingMeta["contentType"] = encoding.ContentType
+		}
+		if encoding.Style != "" {
+			encodingMeta["style"] = encoding.Style
+		}
+		if encoding.Explode != nil {
+			encodingMeta["explode"] = encoding.Explode
+		}
+		if encoding.AllowReserved {
+			encodingMeta["allowReserved"] = true
+		}
+		if len(encoding.Headers) > 0 {
+			encodingMeta["headers"] = summarizeEncodingHeaders(encoding.Headers)
+		}
+		if len(encoding.Extensions) > 0 {
+			encodingMeta["extensions"] = encoding.Extensions
+		}
+		if len(encodingMeta) > 0 {
+			result[name] = encodingMeta
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func summarizeEncodingHeaders(headers map[string]ir.HeaderInfo) map[string]any {
+	result := make(map[string]any)
+	for name, header := range headers {
+		headerMeta := make(map[string]any)
+		if header.Description != "" {
+			headerMeta["description"] = header.Description
+		}
+		if header.Required {
+			headerMeta["required"] = true
+		}
+		if header.Deprecated {
+			headerMeta["deprecated"] = true
+		}
+		if header.AllowEmptyValue {
+			headerMeta["allowEmptyValue"] = true
+		}
+		if header.Style != "" {
+			headerMeta["style"] = header.Style
+		}
+		if header.Explode {
+			headerMeta["explode"] = true
+		}
+		if header.AllowReserved {
+			headerMeta["allowReserved"] = true
+		}
+		if header.Schema != nil {
+			headerMeta["schema"] = header.Schema
+		}
+		if header.Example != nil {
+			headerMeta["example"] = header.Example
+		}
+		if len(header.Examples) > 0 {
+			headerMeta["examples"] = header.Examples
+		}
+		if len(header.Extensions) > 0 {
+			headerMeta["extensions"] = header.Extensions
+		}
+		if len(headerMeta) > 0 {
+			result[name] = headerMeta
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

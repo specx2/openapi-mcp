@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
 )
 
 func TestHandleHTTPResponseJSON(t *testing.T) {
@@ -113,5 +114,55 @@ func TestResponseProcessorProcessErrorUsesHandler(t *testing.T) {
 	}
 	if !strings.Contains(content.Text, "HTTP 500") {
 		t.Fatalf("unexpected content: %s", content.Text)
+	}
+}
+
+func TestResponseProcessorValidationFailure(t *testing.T) {
+	schema := ir.Schema{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"value": map[string]interface{}{"type": "string"},
+		},
+		"required": []interface{}{"value"},
+	}
+
+	processor := NewResponseProcessor(schema, false, NewErrorHandler("info"))
+	result, err := processor.processJSON(map[string]interface{}{"other": "x"})
+	if err != nil {
+		t.Fatalf("processJSON returned error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected validation failure to produce error result")
+	}
+	if len(result.Content) == 0 {
+		t.Fatalf("expected error message content")
+	}
+	message := result.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(message, "Response validation failed") {
+		t.Fatalf("expected validation message, got %s", message)
+	}
+}
+
+func TestResponseProcessorValidationSuccess(t *testing.T) {
+	schema := ir.Schema{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"value": map[string]interface{}{"type": "string"},
+		},
+	}
+	processor := NewResponseProcessor(schema, false, NewErrorHandler("info"))
+	result, err := processor.processJSON(map[string]interface{}{"value": "hello"})
+	if err != nil {
+		t.Fatalf("processJSON returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result")
+	}
+	structured, ok := result.StructuredContent.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured content map")
+	}
+	if structured["value"] != "hello" {
+		t.Fatalf("unexpected structured content %v", structured)
 	}
 }

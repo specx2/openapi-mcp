@@ -63,6 +63,15 @@ func (eh *ErrorHandler) HandleValidationError(err error) *mcp.CallToolResult {
 	}
 }
 
+func (eh *ErrorHandler) HandleResponseValidationError(err error) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		IsError: true,
+		Content: []mcp.Content{
+			mcp.NewTextContent("Response validation failed: " + err.Error()),
+		},
+	}
+}
+
 // HandleParseError 处理解析错误
 func (eh *ErrorHandler) HandleParseError(err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{

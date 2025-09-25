@@ -20,6 +20,19 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 	paramMap := make(map[string]ir.ParamMapping)
 	bodyProps := cf.collectBodyProperties(route)
 
+	bodyContentType := ""
+	var bodyExample interface{}
+	var bodyExampleSets map[string]interface{}
+	if route.RequestBody != nil {
+		bodyContentType = parser.GetContentType(route.RequestBody.ContentSchemas)
+		if route.RequestBody.MediaExamples != nil {
+			bodyExample = route.RequestBody.MediaExamples[bodyContentType]
+		}
+		if route.RequestBody.MediaExampleSets != nil {
+			bodyExampleSets = route.RequestBody.MediaExampleSets[bodyContentType]
+		}
+	}
+
 	for _, param := range route.Parameters {
 		if param.Schema == nil {
 			continue
@@ -29,6 +42,8 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 		if !param.Required {
 			schemaCopy = makeOptionalNullable(schemaCopy)
 		}
+
+		schemaCopy = annotateParameterSchema(schemaCopy, param)
 
 		argName := param.Name
 		if bodyProps[param.Name] {
@@ -51,14 +66,19 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 	}
 
 	if route.RequestBody != nil {
-		contentType := parser.GetContentType(route.RequestBody.ContentSchemas)
-		if contentType != "" {
-			bodySchema := route.RequestBody.ContentSchemas[contentType]
+		if bodyContentType != "" {
+			bodySchema := route.RequestBody.ContentSchemas[bodyContentType]
 			if bodySchema != nil {
 				normalizedBody := normalizeSchema(bodySchema)
+				if route.RequestBody.Description != "" {
+					if _, ok := normalizedBody["description"].(string); !ok {
+						normalizedBody["description"] = route.RequestBody.Description
+					}
+				}
 				properties := normalizedBody.Properties()
 				if len(properties) == 0 {
 					propName := determineBodyPropertyName(normalizedBody)
+					applyBodyExamplesToSchema(normalizedBody, "", bodyExample, bodyExampleSets)
 					schema["properties"].(map[string]interface{})[propName] = normalizedBody
 					paramMap[propName] = ir.ParamMapping{
 						OpenAPIName:  propName,
@@ -71,7 +91,9 @@ func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[s
 					}
 				} else {
 					for propName, propSchema := range properties {
-						schema["properties"].(map[string]interface{})[propName] = normalizeSchema(propSchema)
+						normalizedProp := normalizeSchema(propSchema)
+						applyBodyExamplesToSchema(normalizedProp, propName, bodyExample, bodyExampleSets)
+						schema["properties"].(map[string]interface{})[propName] = normalizedProp
 						paramMap[propName] = ir.ParamMapping{
 							OpenAPIName:  propName,
 							Location:     "body",
@@ -133,6 +155,94 @@ func (cf *ComponentFactory) collectBodyProperties(route ir.HTTPRoute) map[string
 	return bodyProps
 }
 
+func applyBodyExamplesToSchema(schema ir.Schema, propName string, rawExample interface{}, namedExamples map[string]interface{}) {
+	if schema == nil {
+		return
+	}
+
+	if exampleValue, ok := exampleValueForProperty(rawExample, propName); ok {
+		if exampleValue != nil {
+			if _, exists := schema["example"]; !exists {
+				schema["example"] = exampleValue
+			}
+		}
+	}
+
+	if len(namedExamples) > 0 {
+		if _, exists := schema["examples"]; !exists {
+			if projected := projectNamedExamplesForProperty(namedExamples, propName); len(projected) > 0 {
+				schema["examples"] = projected
+			}
+		}
+	}
+}
+
+func projectNamedExamplesForProperty(named map[string]interface{}, propName string) map[string]interface{} {
+	projected := make(map[string]interface{}, len(named))
+	for name, entry := range named {
+		if propName == "" {
+			projected[name] = cloneValue(entry)
+			continue
+		}
+		if projectedEntry, ok := projectNamedExampleEntry(entry, propName); ok {
+			projected[name] = projectedEntry
+		}
+	}
+	if len(projected) == 0 {
+		return nil
+	}
+	return projected
+}
+
+func projectNamedExampleEntry(entry interface{}, propName string) (interface{}, bool) {
+	entryMap, ok := entry.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+
+	if propName == "" {
+		return cloneExampleEntryMap(entryMap), true
+	}
+
+	value, ok := entryMap["value"]
+	if !ok {
+		return nil, false
+	}
+
+	propValue, ok := exampleValueForProperty(value, propName)
+	if !ok {
+		return nil, false
+	}
+
+	cloned := cloneExampleEntryMap(entryMap)
+	cloned["value"] = propValue
+	return cloned, true
+}
+
+func cloneExampleEntryMap(entry map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(entry))
+	for key, val := range entry {
+		cloned[key] = cloneValue(val)
+	}
+	return cloned
+}
+
+func exampleValueForProperty(raw interface{}, propName string) (interface{}, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	if propName == "" {
+		return raw, true
+	}
+	if obj, ok := raw.(map[string]interface{}); ok {
+		if val, exists := obj[propName]; exists {
+			return val, true
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
 func deduplicate(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
@@ -144,6 +254,67 @@ func deduplicate(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func annotateParameterSchema(schema ir.Schema, param ir.ParameterInfo) ir.Schema {
+	if schema == nil {
+		schema = make(ir.Schema)
+	}
+
+	description := ""
+	if existing, ok := schema["description"].(string); ok {
+		description = existing
+	}
+	if description == "" && param.Description != "" {
+		description = param.Description
+	}
+
+	location := param.In
+	if location == "" {
+		location = "parameter"
+	}
+	locationDesc := fmt.Sprintf("(%s parameter)", titleCase(location))
+	if description == "" {
+		description = locationDesc
+	} else if !strings.Contains(strings.ToLower(description), strings.ToLower(locationDesc)) {
+		description = fmt.Sprintf("%s %s", description, locationDesc)
+	}
+
+	schema["description"] = description
+
+	if param.Deprecated {
+		schema["deprecated"] = true
+	}
+
+	if param.AllowEmptyValue {
+		schema["x-allowEmptyValue"] = true
+	}
+
+	if param.Example != nil {
+		if _, ok := schema["example"]; !ok {
+			schema["example"] = param.Example
+		}
+	}
+
+	if len(param.Examples) > 0 {
+		if _, ok := schema["examples"]; !ok {
+			schema["examples"] = param.Examples
+		}
+	}
+
+	return schema
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	for i := 1; i < len(runes); i++ {
+		runes[i] = unicode.ToLower(runes[i])
+	}
+	return string(runes)
 }
 
 func cloneSchema(schema ir.Schema) ir.Schema {
@@ -299,7 +470,40 @@ func collectRefsInto(value interface{}, refs map[string]struct{}) {
 func normalizeSchema(schema ir.Schema) ir.Schema {
 	cloned := cloneSchema(schema)
 	cloned = mergeAllOf(cloned)
+	normalizeComposedSchemas(cloned, "oneOf")
+	normalizeComposedSchemas(cloned, "anyOf")
+
+	if items, ok := cloned["items"].(map[string]interface{}); ok {
+		cloned["items"] = normalizeSchema(items)
+	} else if itemsSchema, ok := cloned["items"].(ir.Schema); ok {
+		cloned["items"] = normalizeSchema(itemsSchema)
+	}
+
+	if props, ok := cloned["properties"].(map[string]interface{}); ok {
+		for key, value := range props {
+			props[key] = normalizeSchema(toSchema(value))
+		}
+	}
 	return cloned
+}
+
+func normalizeComposedSchemas(schema ir.Schema, key string) {
+	list, ok := schema[key].([]interface{})
+	if !ok {
+		return
+	}
+
+	normalized := make([]interface{}, 0, len(list))
+	for _, item := range list {
+		entry := toSchema(item)
+		if len(entry) == 0 {
+			normalized = append(normalized, item)
+			continue
+		}
+		normalized = append(normalized, normalizeSchema(entry))
+	}
+
+	schema[key] = normalized
 }
 
 func mergeAllOf(schema ir.Schema) ir.Schema {
@@ -429,6 +633,12 @@ func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, 
 	}
 
 	optimizedSchema := parser.OptimizeSchema(wrappedSchema)
+
+	if defs := pruneSchemaDefinitions(optimizedSchema, route.SchemaDefs); len(defs) > 0 {
+		optimizedSchema["$defs"] = defs
+	} else {
+		delete(optimizedSchema, "$defs")
+	}
 
 	return optimizedSchema, wrapResult
 }

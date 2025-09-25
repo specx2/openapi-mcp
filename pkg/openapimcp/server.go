@@ -81,6 +81,9 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 	if options.RouteMapFunc != nil {
 		m = m.WithMapFunc(options.RouteMapFunc)
 	}
+	if len(options.GlobalTags) > 0 {
+		m = m.WithGlobalTags(options.GlobalTags...)
+	}
 
 	f := factory.NewComponentFactory(options.HTTPClient, options.BaseURL)
 	if options.CustomNames != nil {
@@ -112,6 +115,11 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 
 func (s *Server) registerComponents(routes []ir.HTTPRoute) error {
 	mappedRoutes := s.mapper.MapRoutes(routes)
+	for idx := range mappedRoutes {
+		merged := mergeTags(mappedRoutes[idx].Route.Tags, mappedRoutes[idx].Tags)
+		mappedRoutes[idx].Route.Tags = merged
+		mappedRoutes[idx].Tags = merged
+	}
 
 	components, err := s.factory.CreateComponents(mappedRoutes)
 	if err != nil {
@@ -245,4 +253,35 @@ func extractParametersFromURI(uri, template string) map[string]string {
 	}
 
 	return params
+}
+
+func mergeTags(existing, extra []string) []string {
+	if len(extra) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(extra))
+	result := make([]string, 0, len(existing)+len(extra))
+	for _, tag := range existing {
+		if tag == "" {
+			continue
+		}
+		normalized := strings.TrimSpace(tag)
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	for _, tag := range extra {
+		if tag == "" {
+			continue
+		}
+		normalized := strings.TrimSpace(tag)
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
 }

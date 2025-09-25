@@ -1,6 +1,10 @@
 package mapper
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/mark3labs/mcp-go/mcp"
+)
 
 type MCPType string
 
@@ -17,6 +21,7 @@ type RouteMap struct {
 	Tags        []string
 	MCPType     MCPType
 	MCPTags     []string
+	Annotations *mcp.ToolAnnotation
 }
 
 func NewRouteMap() *RouteMap {
@@ -49,5 +54,10 @@ func (rm *RouteMap) WithMCPType(mcpType MCPType) *RouteMap {
 
 func (rm *RouteMap) WithMCPTags(tags ...string) *RouteMap {
 	rm.MCPTags = tags
+	return rm
+}
+
+func (rm *RouteMap) WithAnnotations(annotation *mcp.ToolAnnotation) *RouteMap {
+	rm.Annotations = annotation
 	return rm
 }
