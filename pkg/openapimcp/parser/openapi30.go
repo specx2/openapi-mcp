@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -17,6 +16,10 @@ type OpenAPI30Parser struct {
 	components         map[string]ir.Schema
 	callbackComponents map[string]*v3.Callback
 	pathItemComponents map[string]*v3.PathItem
+	config             ParserConfig
+	resolver           *schemaResolver
+	schemaDefs         map[string]ir.Schema
+	converter          *schemaConverter
 }
 
 func NewOpenAPI30Parser() *OpenAPI30Parser {
@@ -25,6 +28,10 @@ func NewOpenAPI30Parser() *OpenAPI30Parser {
 		callbackComponents: make(map[string]*v3.Callback),
 		pathItemComponents: make(map[string]*v3.PathItem),
 	}
+}
+
+func (p *OpenAPI30Parser) setConfig(cfg ParserConfig) {
+	p.config = cfg
 }
 
 func (p *OpenAPI30Parser) ParseSpec(spec []byte) ([]ir.HTTPRoute, error) {
@@ -38,7 +45,16 @@ func (p *OpenAPI30Parser) ParseSpec(spec []byte) ([]ir.HTTPRoute, error) {
 	for k := range p.pathItemComponents {
 		delete(p.pathItemComponents, k)
 	}
-	p.document, err = libopenapi.NewDocument(spec)
+	p.schemaDefs = make(map[string]ir.Schema)
+
+	p.resolver, err = newSchemaResolver(spec, p.config.SpecURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialise schema resolver: %w", err)
+	}
+
+	converter := newSchemaConverter(p.resolver, true)
+	p.converter = converter
+	p.document, err = newDocument(spec, p.config.SpecURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create document: %w", err)
 	}
@@ -54,7 +70,10 @@ func (p *OpenAPI30Parser) ParseSpec(spec []byte) ([]ir.HTTPRoute, error) {
 	if doc.Components != nil {
 		if doc.Components.Schemas != nil {
 			for name, schema := range doc.Components.Schemas.FromOldest() {
-				p.components[name] = p.convertSchema(schema.Schema())
+				converted := converter.convert(schema.Schema())
+				ref := fmt.Sprintf("#/components/schemas/%s", name)
+				converter.registerComponent(ref, converted)
+				p.components[name] = converted
 			}
 		}
 		if doc.Components.Callbacks != nil {
@@ -121,9 +140,15 @@ func (p *OpenAPI30Parser) ParseSpec(spec []byte) ([]ir.HTTPRoute, error) {
 				route.Callbacks = callbacks
 			}
 
-			route.SchemaDefs = p.buildSchemaDefinitions()
-
 			routes = append(routes, route)
+		}
+	}
+
+	p.schemaDefs = converter.definitions()
+	if len(p.schemaDefs) > 0 {
+		defs := ir.Schema{"$defs": p.schemaDefs}
+		for i := range routes {
+			routes[i].SchemaDefs = defs
 		}
 	}
 
@@ -520,42 +545,31 @@ func (p *OpenAPI30Parser) convertSchema(schema interface{}) ir.Schema {
 	if schema == nil {
 		return nil
 	}
-
-	schemaBytes, err := json.Marshal(schema)
+	if p.converter != nil {
+		return p.converter.convert(schema)
+	}
+	converted, err := convertToGenericMap(schema)
 	if err != nil {
 		return nil
 	}
-
-	var schemaMap map[string]interface{}
-	if err := json.Unmarshal(schemaBytes, &schemaMap); err != nil {
-		return nil
-	}
-
-	return ConvertToJSONSchema(schemaMap, true)
-}
-
-func (p *OpenAPI30Parser) buildSchemaDefinitions() ir.Schema {
-	if len(p.components) == 0 {
-		return nil
-	}
-
-	return ir.Schema{"$defs": p.components}
+	return ConvertToJSONSchema(converted, true)
 }
 
 func (p *OpenAPI30Parser) ResolveReference(ref string) (ir.Schema, error) {
-	if !strings.HasPrefix(ref, "#/") {
-		return nil, fmt.Errorf("unsupported reference format: %s", ref)
+	if p.resolver == nil {
+		return nil, fmt.Errorf("schema resolver not initialized")
 	}
-
-	if strings.HasPrefix(ref, "#/components/schemas/") {
-		name := strings.TrimPrefix(ref, "#/components/schemas/")
-		if schema, ok := p.components[name]; ok {
-			return schema, nil
+	if name, ok := p.resolver.getDefinitionName(ref); ok {
+		if schema, exists := p.schemaDefs[name]; exists {
+			return cloneIRSchema(schema), nil
 		}
-		return nil, fmt.Errorf("schema not found: %s", name)
 	}
-
-	return nil, fmt.Errorf("unsupported reference path: %s", ref)
+	_, schemaMap, err := p.resolver.resolveRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	converter := newSchemaConverter(p.resolver, true)
+	return converter.convertMap(schemaMap), nil
 }
 
 func (p *OpenAPI30Parser) GetVersion() string {

@@ -41,5 +41,6 @@
 - 回归测试补充：`factory/description_test.go` 验证扩展字段输出，`parser/openapi_callbacks_test.go` 覆盖回调组件 `$ref` 场景，`go test ./...` 全量通过。
 - 组件命名器增强：`ComponentFactory` 支持 `CustomNames` 按 `operationId` 或 `METHOD /path` 覆盖组件名称，空摘要时回退 `method_path`，并在重名时自动追加后缀；新增 `factory/naming_test.go` 确保覆盖。
 - 内容类型协商改进：`RequestBodyInfo` 记录媒体类型顺序，`RequestBuilder` 会优先选择 `application/json`/`*+json`、`multipart/form-data`、`text/plain` 等语义更合适的内容类型，并识别 `_rawBody` 的文本/JSON/二进制场景；新增 `executor/builder_test.go` 针对媒体类型优先级的回归测试。
+- Schema 解析升级：引入 `schema_resolver` 与 `schema_converter`，支持外部/相对 `$ref`、跨文件 `$defs`、`discriminator`、`not` 等高级 JSON Schema 特性，新增 `WithSpecURL` 以显式指定基路径并通过 `schema_resolution_test.go` 覆盖复杂引用场景。
 - 路由映射增强：`RouteMapper` 现在支持全局标签、匹配映射自带标签以及 `RouteMapFunc` 返回完整决策（类型/标签/注解），与 fastmcp 的 `DEFAULT_ROUTE_MAPPINGS`+`route_map_fn` 行为保持一致，并将聚合标签写入 `_meta.tags` 方便客户端消费。
 - 注解提示对齐：`executor.NewOpenAPITool` 根据 HTTP 动词推导默认 `ToolAnnotation`（如 GET 自动标记为只读、幂等），同时允许映射或自定义函数覆盖，并传递到 MCP `annotations` 字段。

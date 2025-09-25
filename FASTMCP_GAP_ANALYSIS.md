@@ -18,10 +18,10 @@
 - `_contentType` / `_rawBody` 仍需调用方手动覆盖；可考虑提供更友好的 API（例如依据 schema 自动识别二进制流）来进一步靠拢 fastmcp 无感化的体验。
 
 ### Schema 解析与合成
-- `pkg/openapimcp/factory/schema.go:24`：`combineSchemas` 现在会保留 `oneOf`/`anyOf` 并标准化 `$defs`，同时在描述与 meta 中提示变体；但仍缺 `discriminator`/`not` 处理以及跨组合的 `required` 合并策略。
-- `pkg/openapimcp/parser/openapi30.go:221`：输出与请求体 `$defs` 会按引用裁剪，但依旧无法解析外部 `$ref`、`link` 及跨文件组件；可参考 fastmcp 使用 `jsonschema_path` 的做法补齐。
-- `pkg/openapimcp/parser/openapi30.go:124`：✅ 参数/请求体/响应的 `example`、`examples`、`default`、`encoding.headers` 与 `x-*` 扩展均已保留，描述与 `_meta.openapi` 同步呈现；仍需处理 `discriminator`、`callbacks` 以外的复杂扩展（如 `x-jsonschema-` 系列）与 Schema combination 的 edge cases。
-- ✅ `pkg/openapimcp/parser/openapi_callbacks_test.go` 证明当前实现已解析回调 `$ref` 并输出 `CallbackInfo`，与 fastmcp 对齐。
+- `pkg/openapimcp/factory/schema.go:24`：`combineSchemas` 现在会保留 `oneOf`/`anyOf` 并标准化 `$defs`，描述输出同步变体信息；依旧可以进一步优化 `link`、高级条件组合等边缘结构。
+- `pkg/openapimcp/parser/openapi30.go:180` 与 `schema_resolver.go`：✅ 通过 `schemaResolver`/`schemaConverter` 解析外部与相对 `$ref`、跨文件 `$defs`、`discriminator`、`not` 等高级 JSON Schema 特性。
+- `pkg/openapimcp/parser/openapi30.go:124`：✅ 参数/请求体/响应的 `example`、`examples`、`default`、`encoding.headers` 与 `x-*` 扩展均已保留，描述与 `_meta.openapi` 同步呈现；仍需关注 JSON Schema `link`、属性合并策略等剩余高阶扩展。
+- ✅ `pkg/openapimcp/parser/openapi_callbacks_test.go` 及 `schema_resolution_test.go` 验证回调与跨文件引用解析符合预期。
 
 ### 工具执行链能力
 - `pkg/openapimcp/executor/tool.go:40` 已支持根据 HTTP 动词推导默认 `ToolAnnotation` 并接受路由映射覆盖，同时在 `_meta.tags` 和 `_meta.openapi` 中曝光扩展/回调信息；仍缺少 fastmcp 的执行前/执行后钩子与自定义 serializer 注入机制。

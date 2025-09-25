@@ -23,6 +23,7 @@
 - 工具注解/标签同步：`executor.NewOpenAPITool` 基于 HTTP 方法推导默认 `ToolAnnotation`（GET/HEAD 只读、DELETE/PUT 幂等等），允许路由映射覆盖，并把聚合标签写入 `_meta.tags`。参见 `pkg/openapimcp/executor/tool.go`、`pkg/openapimcp/executor/tool_meta_test.go`。
 - 组件命名对齐 fastmcp：`ComponentFactory` 支持 `CustomNames` 以 `operationId` 或 `METHOD /path`、`method:/path` 键覆盖名称，并在 slug 为空时回退 `method_path`，对重复名称自动追加后缀；新增 `pkg/openapimcp/factory/naming_test.go` 确保自定义与冲突场景稳定。
 - 内容类型协商增强：保留 OpenAPI `content` 的声明顺序并在请求构建时优先选择 `application/json` / `*+json`、`multipart`、`text` 等更符合语义的媒体类型，自动识别原始 JSON/文本/二进制输入；新增 `pkg/openapimcp/executor/builder_test.go` 验证高级选择逻辑。
+- Schema 深水解析：引入 `schemaResolver` + `schemaConverter`，支持外部/相对 `$ref`、跨文件 `$defs`、`discriminator`、`not` 等进阶特性，并通过 `ServerOptions.WithSpecURL` 配置基础路径；新增 `pkg/openapimcp/parser/schema_resolution_test.go` 验证三方文件引用与组合 schema 行为。
 - 响应描述增强：工具描述会自动附带主要响应的结构摘要与示例，便于调用方理解返回 payload。参见 `pkg/openapimcp/factory/description.go`、`pkg/openapimcp/factory/description_test.go`。
 - 合成 schema 保留 oneOf/anyOf：`normalizeSchema` 会递归保留并标准化组合结构，描述输出会提示可选分支，与 fastmcp 的变体信息一致。参见 `pkg/openapimcp/factory/schema.go`、`pkg/openapimcp/factory/description.go`、`pkg/openapimcp/factory/description_test.go`。
 - 输入参数校验：在构建请求前使用 `jsonschema` 对工具入参执行验证，提前给出 schema 级错误提示。参见 `pkg/openapimcp/executor/tool.go`、`pkg/openapimcp/executor/tool_validation_test.go`。
@@ -44,7 +45,7 @@
 对照 `/tmp/fastmcp/src/fastmcp/experimental/server/openapi` 及其 utilities：
 1. **请求构建能力**：fastmcp 使用 `RequestDirector` 与 openapi-core 生成 HTTP 请求，自动处理多内容类型优先级、`encoding`、oneOf/anyOf 分支选择及 schema 级校验。Go 版本虽已覆盖 JSON/form/multipart/text/octet-stream、自定义 encoding 头与默认值填充，但尚未支持多媒体类型权重、`discriminator` 驱动的分支决策与基于 schema 的自动参数补齐，仍需引入更通用的指挥器组件。
 2. **错误处理**：✅ 已对齐。`ErrorHandler` 解析 HTTP 状态、格式化 JSON 错误体并区分可重试错误，行为与 fastmcp `OpenAPITool.run` 一致。
-3. **Schema 处理**：✅ `allOf`/`oneOf`/`anyOf` 正常保留并裁剪 `$defs`，但尚未解析外部 `$ref`、`discriminator`、`link` 以及跨组件的示例复用；需要扩展 parser 以覆盖这些高阶特性并完善 nullable 边界场景。
+3. **Schema 处理**：✅ `allOf`/`oneOf`/`anyOf`、`discriminator`、`not`、外部/相对 `$ref` 及跨文件 `$defs` 均已解析，仍缺 `link`、高级 property merge 等 JSON Schema 边缘特性，可继续在解析器层做增量。
 4. **超时与客户端设置**：✅ 已对齐。可通过 `WithHTTPClient` / `WithHTTPClientConfig` 注入自定义 `http.Client`、默认 Headers、超时与 BaseURL，`DefaultHTTPClient` 会自动附加这些配置。
 5. **高级路由/命名功能**：✅ `RouteMapper` 现支持 `route_map_fn` 等价回调、全局标签与注解透传；命名器已支持 `CustomNames` 键映射与冲突后缀。仍缺少更智能的自动命名策略（按 tag/响应推导语义名称）。
 6. **响应 Schema 对齐**：fastmcp 会在非对象响应时自动包裹 `result` 并复用 `$defs`。Go 版虽然提供 `wrapResult` 和响应校验，但 nullable/`anyOf` 与外部 `$ref` 剪裁仍需补完，尤其是多态响应的结构化提示。

@@ -21,6 +21,7 @@ type ServerOptions struct {
 	Parser        parser.OpenAPIParser
 	ServerName    string
 	ServerVersion string
+	SpecURL       string
 }
 
 func defaultServerOptions() *ServerOptions {
@@ -93,5 +94,11 @@ func WithServerInfo(name, version string) ServerOption {
 	return func(opts *ServerOptions) {
 		opts.ServerName = name
 		opts.ServerVersion = version
+	}
+}
+
+func WithSpecURL(specURL string) ServerOption {
+	return func(opts *ServerOptions) {
+		opts.SpecURL = specURL
 	}
 }

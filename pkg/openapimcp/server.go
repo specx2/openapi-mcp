@@ -61,7 +61,7 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 		opt(options)
 	}
 
-	p, err := parser.NewParser(spec)
+	p, err := parser.NewParser(spec, parser.WithSpecURL(options.SpecURL))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parser: %w", err)
 	}
