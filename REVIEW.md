@@ -44,3 +44,4 @@
 - Schema 解析升级：引入 `schema_resolver` 与 `schema_converter`，支持外部/相对 `$ref`、跨文件 `$defs`、`discriminator`、`not` 等高级 JSON Schema 特性，新增 `WithSpecURL` 以显式指定基路径并通过 `schema_resolution_test.go` 覆盖复杂引用场景。
 - 路由映射增强：`RouteMapper` 现在支持全局标签、匹配映射自带标签以及 `RouteMapFunc` 返回完整决策（类型/标签/注解），与 fastmcp 的 `DEFAULT_ROUTE_MAPPINGS`+`route_map_fn` 行为保持一致，并将聚合标签写入 `_meta.tags` 方便客户端消费。
 - 注解提示对齐：`executor.NewOpenAPITool` 根据 HTTP 动词推导默认 `ToolAnnotation`（如 GET 自动标记为只读、幂等），同时允许映射或自定义函数覆盖，并传递到 MCP `annotations` 字段。
+- 响应体验增强：`ResponseProcessor` 统一构造 `_meta`（状态码、状态文本、请求上下文与响应首部），在 204 / 空响应与非 JSON 降级时仍返回结构化结果；`extractOutputSchema` 会在需要包裹时添加 `x-fastmcp-wrap-result` 扩展，`RequestBuilder` 也会基于成功响应声明推导 `Accept` 头，均有对应单测覆盖。

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
 )
 
 type RequestBuilder struct {
@@ -167,6 +168,12 @@ func (rb *RequestBuilder) Build(ctx context.Context, args map[string]interface{}
 
 	for _, cookie := range cookieParams {
 		req.AddCookie(&http.Cookie{Name: cookie.Name, Value: cookie.Value})
+	}
+
+	if req.Header.Get("Accept") == "" {
+		if accept := preferredResponseContentType(rb.route); accept != "" {
+			req.Header.Set("Accept", accept)
+		}
 	}
 
 	return req, nil
@@ -436,6 +443,32 @@ func preferredInitialContentType(body *ir.RequestBodyInfo) string {
 		}
 	}
 	return first
+}
+
+func preferredResponseContentType(route ir.HTTPRoute) string {
+	successStatuses := []string{"200", "201", "202", "203", "204"}
+
+	for _, status := range successStatuses {
+		if response, ok := route.Responses[status]; ok {
+			if ct := parser.GetContentType(response.ContentSchemas); ct != "" {
+				return ct
+			}
+		}
+	}
+
+	if response, ok := route.Responses["default"]; ok {
+		if ct := parser.GetContentType(response.ContentSchemas); ct != "" {
+			return ct
+		}
+	}
+
+	for _, response := range route.Responses {
+		if ct := parser.GetContentType(response.ContentSchemas); ct != "" {
+			return ct
+		}
+	}
+
+	return ""
 }
 
 func (rb *RequestBuilder) availableContentTypes() []string {

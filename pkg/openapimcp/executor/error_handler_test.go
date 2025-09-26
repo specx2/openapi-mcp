@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -96,6 +97,7 @@ func TestResponseProcessorProcessErrorUsesHandler(t *testing.T) {
 		StatusCode: http.StatusInternalServerError,
 		Status:     "500 Internal Server Error",
 		Body:       io.NopCloser(strings.NewReader(`{"error":"boom"}`)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
 	}
 
 	result, err := processor.Process(resp)
@@ -114,6 +116,13 @@ func TestResponseProcessorProcessErrorUsesHandler(t *testing.T) {
 	}
 	if !strings.Contains(content.Text, "HTTP 500") {
 		t.Fatalf("unexpected content: %s", content.Text)
+	}
+	if result.Result.Meta == nil {
+		t.Fatalf("expected meta to be populated")
+	}
+	status, ok := result.Result.Meta.AdditionalFields["status"].(int)
+	if !ok || status != http.StatusInternalServerError {
+		t.Fatalf("expected meta status 500, got %v", result.Result.Meta.AdditionalFields["status"])
 	}
 }
 
@@ -164,5 +173,72 @@ func TestResponseProcessorValidationSuccess(t *testing.T) {
 	}
 	if structured["value"] != "hello" {
 		t.Fatalf("unexpected structured content %v", structured)
+	}
+}
+
+func TestResponseProcessorProcessSuccessMeta(t *testing.T) {
+	processor := NewResponseProcessor(nil, false, NewErrorHandler("info"))
+
+	reqURL, _ := url.Parse("https://api.example.com/widgets")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"value":"ok"}`)),
+		Request:    &http.Request{Method: "GET", URL: reqURL},
+	}
+
+	result, err := processor.Process(resp)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result")
+	}
+	structured, ok := result.StructuredContent.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured content map")
+	}
+	if structured["value"] != "ok" {
+		t.Fatalf("unexpected structured content %v", structured)
+	}
+	if result.Result.Meta == nil {
+		t.Fatalf("expected meta to be populated")
+	}
+	if status, ok := result.Result.Meta.AdditionalFields["status"].(int); !ok || status != http.StatusOK {
+		t.Fatalf("expected status 200 in meta, got %v", result.Result.Meta.AdditionalFields["status"])
+	}
+	if method, ok := result.Result.Meta.AdditionalFields["requestMethod"].(string); !ok || method != "GET" {
+		t.Fatalf("expected request method in meta, got %v", result.Result.Meta.AdditionalFields["requestMethod"])
+	}
+}
+
+func TestResponseProcessorProcessNoContent(t *testing.T) {
+	processor := NewResponseProcessor(nil, true, NewErrorHandler("info"))
+	resp := &http.Response{
+		StatusCode: http.StatusNoContent,
+		Status:     "204 No Content",
+		Body:       io.NopCloser(strings.NewReader("")),
+	}
+
+	result, err := processor.Process(resp)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result")
+	}
+	structured, ok := result.StructuredContent.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured content map")
+	}
+	if _, exists := structured["result"]; !exists {
+		t.Fatalf("expected wrap result map to include 'result' key")
+	}
+	if result.Result.Meta == nil {
+		t.Fatalf("expected meta to be populated")
+	}
+	if status, ok := result.Result.Meta.AdditionalFields["status"].(int); !ok || status != http.StatusNoContent {
+		t.Fatalf("expected status 204 in meta, got %v", result.Result.Meta.AdditionalFields["status"])
 	}
 }

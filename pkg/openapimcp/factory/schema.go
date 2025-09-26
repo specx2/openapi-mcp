@@ -640,5 +640,9 @@ func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, 
 		delete(optimizedSchema, "$defs")
 	}
 
+	if wrapResult {
+		optimizedSchema["x-fastmcp-wrap-result"] = true
+	}
+
 	return optimizedSchema, wrapResult
 }

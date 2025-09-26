@@ -101,3 +101,64 @@ func TestRequestBuilderRawBodyPrefersTextForPlainString(t *testing.T) {
 		t.Fatalf("expected text/plain content type, got %q", got)
 	}
 }
+
+func TestRequestBuilderSetsAcceptHeaderFromResponses(t *testing.T) {
+	route := ir.HTTPRoute{
+		Path:   "/widgets",
+		Method: "GET",
+		Responses: map[string]ir.ResponseInfo{
+			"200": {
+				ContentSchemas: map[string]ir.Schema{
+					"application/json": {"type": "object"},
+				},
+			},
+		},
+	}
+
+	builder := executor.NewRequestBuilder(route, nil, "")
+	req, err := builder.Build(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+
+	if got := req.Header.Get("Accept"); got != "application/json" {
+		t.Fatalf("expected Accept header application/json, got %q", got)
+	}
+}
+
+func TestRequestBuilderDoesNotOverrideAcceptHeader(t *testing.T) {
+	paramMap := map[string]ir.ParamMapping{
+		"Accept": {
+			OpenAPIName: "Accept",
+			Location:    ir.ParameterInHeader,
+		},
+	}
+
+	route := ir.HTTPRoute{
+		Path:   "/widgets",
+		Method: "GET",
+		Parameters: []ir.ParameterInfo{
+			{
+				Name: "Accept",
+				In:   ir.ParameterInHeader,
+			},
+		},
+		Responses: map[string]ir.ResponseInfo{
+			"200": {
+				ContentSchemas: map[string]ir.Schema{
+					"application/json": {"type": "object"},
+				},
+			},
+		},
+	}
+
+	builder := executor.NewRequestBuilder(route, paramMap, "")
+	req, err := builder.Build(context.Background(), map[string]interface{}{"Accept": "application/xml"})
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+
+	if got := req.Header.Get("Accept"); got != "application/xml" {
+		t.Fatalf("expected Accept header application/xml, got %q", got)
+	}
+}

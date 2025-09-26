@@ -5,13 +5,13 @@
 ## 概览
 
 - ✅ **已基本对齐**：路由解析、工具/资源/模板生成、基础参数映射、错误返回包装以及路径参数的 `simple/label/matrix` 序列化。
-- ⚠️ **仍有明显差距**：请求构建器缺乏 openapi-core 级别的序列化与验证、Schema 解析尚未覆盖 `discriminator`/外部 `$ref` 等进阶特性、编码/内容类型选择策略仍待增强、工具执行链缺少上下游钩子。
+- ⚠️ **仍有明显差距**：请求构建器缺乏 fastmcp `RequestDirector` 的分支推断/格式级校验、JSON Schema `link`/更复杂条件仍在排期、响应与资源层缺少可插拔钩子及流式处理能力。
 - 📉 **质量隐患**：重复/未使用代码、巨型函数、`TODO` 未落地、测试覆盖面不均衡。
 
 ## 详细差距
 
 ### 请求构建与序列化
-- `pkg/openapimcp/executor/builder.go:214` 已能依据 `requestBody.content` 自动在 JSON / form / multipart / text / octet-stream 之间选择，保留 OpenAPI 声明顺序并优先匹配 `application/json` / `*+json` 媒体类型，同时注入默认值、encoding headers、`_contentType`/`_rawBody` 覆盖；但仍缺少 fastmcp `RequestDirector` 的 `discriminator` 分支推断与 schema 级参数修正（如自动补齐缺失字段）。
+- `pkg/openapimcp/executor/builder.go:214` 已能依据 `requestBody.content` 自动在 JSON / form / multipart / text / octet-stream 之间选择，保留 OpenAPI 声明顺序并优先匹配 `application/json` / `*+json` 媒体类型，同时注入默认值、encoding headers、`_contentType`/`_rawBody` 覆盖；现同步依据响应声明推导 `Accept` 头。仍缺少 fastmcp `RequestDirector` 的 `discriminator` 分支推断与 schema 级参数修正（如自动填补缺失字段、格式转换）。
 - `pkg/openapimcp/executor/param_encoder.go:16` 覆盖 `form`/`simple`/`label`/`matrix`/`spaceDelimited`/`pipeDelimited`/`deepObject`，且支持 `allowReserved` 与 Cookie 默认 explode；仍未支持 header/cookie 针对 vendor-specific style 的自定义钩子，与 fastmcp 仍有轻微差距。
 - `pkg/openapimcp/executor/tool.go:69` 已在调用前通过 JSON Schema 校验入参，但缺少 fastmcp 借助 openapi-core 的格式验证/`nullable` 错误定位；需继续扩展校验细粒度（如 pattern、format）。
 - `pkg/openapimcp/executor/parameter_serializer.go:1` 未接入主流程，建议合并入 `param_encoder.go` 以避免重复实现。
@@ -25,8 +25,9 @@
 
 ### 工具执行链能力
 - `pkg/openapimcp/executor/tool.go:40` 已支持根据 HTTP 动词推导默认 `ToolAnnotation` 并接受路由映射覆盖，同时在 `_meta.tags` 和 `_meta.openapi` 中曝光扩展/回调信息；仍缺少 fastmcp 的执行前/执行后钩子与自定义 serializer 注入机制。
+- `pkg/openapimcp/executor/tool.go:40` 已支持根据 HTTP 动词推导默认 `ToolAnnotation` 并接受路由映射覆盖，同时在 `_meta.tags` 和 `_meta.openapi` 中曝光扩展/回调信息；`extractOutputSchema` 会在需要 wrap-result 时加入 `x-fastmcp-wrap-result` 提示。仍缺少 fastmcp 的执行前/执行后钩子与自定义 serializer 注入机制。
 - `pkg/openapimcp/factory/description.go:30` 现在会将主要响应、示例与扩展渲染进描述，但与 fastmcp 相比仍缺少错误响应摘要及多语言格式化。
-- `pkg/openapimcp/executor/processor.go:55` 已对 JSON 错误体结构化输出并执行响应校验，不过在非 JSON (如 CSV/Binary) 且存在 output schema 时仍需更好的降级策略。
+- `pkg/openapimcp/executor/processor.go:55` 会针对成功/失败场景一并构建 `_meta`（状态码、首部、请求 URL），并保持空响应与 wrap-result 的结构化输出；但在非 JSON (如 CSV/Binary) 且存在 output schema 时仍需更好的降级策略及流式/资源型响应支持。
 
 -### Server 与路由能力
 - `pkg/openapimcp/server.go:80`：✅ `RouteMapper` 现提供 `WithMapFunc`、全局标签与注解克隆，行为与 fastmcp `route_map_fn` 相当；命名器也支持 `CustomNames` 覆盖 `operationId` 与 `METHOD /path`，并在重名时追加后缀。仍缺乏跨组件的统一命名策略与按语义自动生成名称的能力。
@@ -45,7 +46,7 @@
 
 ## 建议的下一步
 1. **引入请求指挥器**：抽象 `RequestBuilder` 为独立 `Director`，支持多 content-type/encoding、参数 style/explode 全面实现，并在构建后与 schema 校验结果绑定（可参考 fastmcp `RequestDirector`）。
-2. **强化 schema 组合**：补齐 `discriminator` / `not` / 外部 `$ref` 的处理逻辑，并在裁剪 `$defs` 时支持跨文件引用及复杂示例复用。
+2. **强化 schema 组合**：进一步覆盖 JSON Schema `link`、条件组合以及跨 spec 共享 `$defs` 的复用策略，补齐格式级验证（pattern/format）提示信息。
 3. **完善测试矩阵**：模仿 fastmcp `test_openapi_compatibility`，以真实 spec 驱动回归；针对 header/cookie/allowReserved 等样式补齐单元测试。
 4. **瘦身 RequestBuilder**：拆分函数与冗余代码，引入共享的序列化工具，而非散落在 builder 内的多段逻辑。
 5. **文档同步**：在 README/OPTIMIZE 中持续维护实现 vs 计划清单，确保使用者了解当前限制。
