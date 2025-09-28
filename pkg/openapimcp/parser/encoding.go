@@ -6,7 +6,7 @@ import (
 	"github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/pb33f/libopenapi/orderedmap"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
 )
 
 func convertEncodings(encodings *orderedmap.Map[string, *v3.Encoding], isOpenAPI30 bool) map[string]ir.EncodingInfo {

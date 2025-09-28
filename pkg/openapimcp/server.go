@@ -9,11 +9,11 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/factory"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/factory"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/mapper"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/parser"
 )
 
 type Server struct {

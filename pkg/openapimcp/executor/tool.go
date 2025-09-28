@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/internal"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/internal"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
 )
 
 type OpenAPITool struct {
@@ -45,7 +45,11 @@ func NewOpenAPITool(
 
 	options := []mcp.ToolOption{
 		mcp.WithDescription(description),
-		mcp.WithRawInputSchema(inputSchemaJSON),
+		// Custom option to set raw schema and clear structured schema
+		func(t *mcp.Tool) {
+			t.InputSchema.Type = ""
+			t.RawInputSchema = inputSchemaJSON
+		},
 	}
 	if outputSchema != nil {
 		options = append(options, mcp.WithRawOutputSchema(outputSchemaJSON))

@@ -3,3 +3,6 @@
 .vscode
 .history
 improved_usage
+.cache
+test/_gigasdk
+gigasdk-mcp-server

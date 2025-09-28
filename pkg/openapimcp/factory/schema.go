@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/parser"
 )
 
 func (cf *ComponentFactory) combineSchemas(route ir.HTTPRoute) (ir.Schema, map[string]ir.ParamMapping, error) {

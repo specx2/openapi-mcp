@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/internal"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/internal"
 )
 
 type OpenAPIResource struct {

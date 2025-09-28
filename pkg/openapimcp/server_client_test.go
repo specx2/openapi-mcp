@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
 )
 
 func TestPrepareHTTPClientDefaultConfig(t *testing.T) {

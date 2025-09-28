@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
 )
 
 func compileJSONSchema(raw json.RawMessage) *jsonschema.Schema {

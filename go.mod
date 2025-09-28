@@ -1,4 +1,4 @@
-module github.com/yourusername/openapi-mcp
+module github.com/specx2/openapi-mcp
 
 go 1.24.7
 

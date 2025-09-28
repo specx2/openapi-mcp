@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
 )
 
 func ConvertToJSONSchema(openAPISchema map[string]interface{}, isOpenAPI30 bool) ir.Schema {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
 )
 
 func TestRequestBuilderPrefersJSONVariants(t *testing.T) {

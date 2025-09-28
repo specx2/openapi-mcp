@@ -2,9 +2,9 @@ package factory
 
 import (
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/mapper"
 )
 
 type ComponentFunc func(route ir.HTTPRoute, component interface{})

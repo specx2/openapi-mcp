@@ -3,10 +3,10 @@ package openapimcp
 import (
 	"net/http"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/executor"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/factory"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/mapper"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/factory"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/mapper"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/parser"
 )
 
 type ServerOptions struct {

@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/ir"
-	"github.com/yourusername/openapi-mcp/pkg/openapimcp/parser"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/pkg/openapimcp/parser"
 )
 
 type RequestBuilder struct {
