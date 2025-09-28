@@ -61,16 +61,6 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 		opt(options)
 	}
 
-	p, err := parser.NewParser(spec, parser.WithSpecURL(options.SpecURL))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create parser: %w", err)
-	}
-
-	routes, err := p.ParseSpec(spec)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse spec: %w", err)
-	}
-
 	client, clientConfig := prepareHTTPClient(options)
 	options.HTTPClient = client
 	if clientConfig != nil && options.BaseURL == "" && clientConfig.BaseURL != "" {
@@ -100,17 +90,47 @@ func NewServer(spec []byte, opts ...ServerOption) (*Server, error) {
 
 	s := &Server{
 		mcpServer: mcpServer,
-		parser:    p,
+		parser:    nil,
 		mapper:    m,
 		factory:   f,
 		options:   options,
 	}
 
-	if err := s.registerComponents(routes); err != nil {
+	if err := s.RegisterSpecWithURL(spec, options.SpecURL); err != nil {
 		return nil, fmt.Errorf("failed to register components: %w", err)
 	}
 
 	return s, nil
+}
+
+// RegisterSpec parses an OpenAPI document and registers all derived MCP components with the server.
+// Additional specs can be registered after the server has been constructed.
+func (s *Server) RegisterSpec(spec []byte, parserOpts ...parser.ParserOption) error {
+	p, err := parser.NewParser(spec, parserOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to create parser: %w", err)
+	}
+
+	return s.registerParsedSpec(p, spec)
+}
+
+// RegisterSpecWithURL registers a spec with an optional base URL used for resolving references.
+func (s *Server) RegisterSpecWithURL(spec []byte, specURL string) error {
+	var parserOpts []parser.ParserOption
+	if specURL != "" {
+		parserOpts = append(parserOpts, parser.WithSpecURL(specURL))
+	}
+	return s.RegisterSpec(spec, parserOpts...)
+}
+
+func (s *Server) registerParsedSpec(p parser.OpenAPIParser, spec []byte) error {
+	routes, err := p.ParseSpec(spec)
+	if err != nil {
+		return fmt.Errorf("failed to parse spec: %w", err)
+	}
+
+	s.parser = p
+	return s.registerComponents(routes)
 }
 
 func (s *Server) registerComponents(routes []ir.HTTPRoute) error {

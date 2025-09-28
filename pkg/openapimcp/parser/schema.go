@@ -147,7 +147,39 @@ func GetContentType(contentSchemas map[string]ir.Schema) string {
 }
 
 func IsObjectType(schema ir.Schema) bool {
-	return schema.Type() == "object" || schema.Properties() != nil
+	if schema.Type() == "object" {
+		return true
+	}
+
+	if rawType, ok := schema["type"]; ok {
+		switch t := rawType.(type) {
+		case []interface{}:
+			for _, v := range t {
+				if s, ok := v.(string); ok && s == "object" {
+					return true
+				}
+			}
+		case []string:
+			for _, v := range t {
+				if v == "object" {
+					return true
+				}
+			}
+		}
+	}
+
+	if props, ok := schema["properties"]; ok {
+		switch props.(type) {
+		case map[string]interface{}:
+			return true
+		case map[string]ir.Schema:
+			return true
+		case ir.Schema:
+			return true
+		}
+	}
+
+	return false
 }
 
 func WrapNonObjectSchema(schema ir.Schema) (ir.Schema, bool) {

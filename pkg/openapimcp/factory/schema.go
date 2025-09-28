@@ -626,7 +626,22 @@ func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, 
 
 	schema := responseInfo.ContentSchemas[contentType]
 
-	wrappedSchema, wrapResult := parser.WrapNonObjectSchema(schema)
+	needsWrap := !parser.IsObjectType(schema)
+	if needsWrap {
+		if resolved := resolveSchemaReference(schema, route.SchemaDefs); resolved != nil && parser.IsObjectType(resolved) {
+			needsWrap = false
+		}
+	}
+
+	var (
+		wrappedSchema ir.Schema
+		wrapResult    bool
+	)
+	if needsWrap {
+		wrappedSchema, wrapResult = parser.WrapNonObjectSchema(schema)
+	} else {
+		wrappedSchema = schema
+	}
 
 	if len(route.SchemaDefs.Definitions()) > 0 {
 		wrappedSchema = parser.MergeSchemaDefinitions(wrappedSchema, route.SchemaDefs)
@@ -645,4 +660,39 @@ func (cf *ComponentFactory) extractOutputSchema(route ir.HTTPRoute) (ir.Schema, 
 	}
 
 	return optimizedSchema, wrapResult
+}
+
+func resolveSchemaReference(schema ir.Schema, definitions ir.Schema) ir.Schema {
+	if schema == nil {
+		return nil
+	}
+
+	ref, ok := schema["$ref"].(string)
+	if !ok {
+		return nil
+	}
+
+	if !strings.HasPrefix(ref, "#/$defs/") {
+		return nil
+	}
+
+	if definitions == nil {
+		return nil
+	}
+
+	defMap := definitions.Definitions()
+	if len(defMap) == 0 {
+		return nil
+	}
+
+	name := strings.TrimPrefix(ref, "#/$defs/")
+	if name == "" {
+		return nil
+	}
+
+	if def, ok := defMap[name]; ok {
+		return cloneSchema(def)
+	}
+
+	return nil
 }

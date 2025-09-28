@@ -52,6 +52,7 @@ func (rp *ResponseProcessor) Process(resp *http.Response) (*mcp.CallToolResult, 
 		structured := rp.prepareStructuredResult(nil)
 		return &mcp.CallToolResult{
 			StructuredContent: structured,
+			Content:           buildStructuredTextContent(structured),
 			Result:            mcp.Result{Meta: cloneMeta(meta)},
 		}, nil
 	}
@@ -91,6 +92,7 @@ func (rp *ResponseProcessor) processJSON(result interface{}) (*mcp.CallToolResul
 	}
 	return &mcp.CallToolResult{
 		StructuredContent: structured,
+		Content:           buildStructuredTextContent(structured),
 	}, nil
 }
 
@@ -102,6 +104,19 @@ func (rp *ResponseProcessor) prepareStructuredResult(result interface{}) map[str
 		return resultMap
 	}
 	return map[string]interface{}{"result": result}
+}
+
+func buildStructuredTextContent(structured map[string]interface{}) []mcp.Content {
+	if structured == nil {
+		return []mcp.Content{mcp.NewTextContent("(no content)")}
+	}
+
+	data, err := json.MarshalIndent(structured, "", "  ")
+	if err != nil {
+		return []mcp.Content{mcp.NewTextContent(fmt.Sprintf("%v", structured))}
+	}
+
+	return []mcp.Content{mcp.NewTextContent(string(data))}
 }
 
 func buildResponseMeta(resp *http.Response) *mcp.Meta {

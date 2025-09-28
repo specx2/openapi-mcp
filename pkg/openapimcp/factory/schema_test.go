@@ -417,6 +417,78 @@ func TestExtractOutputSchemaPrunesDefinitions(t *testing.T) {
 	}
 }
 
+func TestExtractOutputSchemaWrapsAllOfResponse(t *testing.T) {
+	cf := NewComponentFactory(nil, "")
+
+	allOfSchema := ir.Schema{
+		"allOf": []interface{}{
+			map[string]interface{}{
+				"$ref": "#/$defs/SuccessResponse",
+			},
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"data": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "string",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	route := ir.HTTPRoute{
+		Responses: map[string]ir.ResponseInfo{
+			"200": {
+				ContentSchemas: map[string]ir.Schema{
+					"application/json": allOfSchema,
+				},
+			},
+		},
+		SchemaDefs: ir.Schema{
+			"$defs": map[string]interface{}{
+				"SuccessResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"code":   map[string]interface{}{"type": "integer"},
+						"detail": map[string]interface{}{"type": "string"},
+					},
+				},
+			},
+		},
+	}
+
+	schema, wrap := cf.extractOutputSchema(route)
+	if !wrap {
+		t.Fatalf("expected wrapResult=true")
+	}
+
+	if schema == nil {
+		t.Fatalf("expected non-nil schema")
+	}
+
+	if typ := schema["type"]; typ != "object" {
+		t.Fatalf("expected schema type 'object', got %v", typ)
+	}
+
+	if wrapped := schema["x-fastmcp-wrap-result"]; wrapped != true {
+		t.Fatalf("expected x-fastmcp-wrap-result flag, got %v", wrapped)
+	}
+
+	props := extractProperties(t, schema["properties"])
+	resultSchema, ok := props["result"]
+	if !ok {
+		t.Fatalf("expected wrapped result property")
+	}
+
+	resultMap := extractSchemaMap(t, resultSchema)
+	if _, ok := resultMap["allOf"]; !ok {
+		t.Fatalf("expected original schema to be preserved under result")
+	}
+}
+
 func TestDetermineBodyPropertyNameFromTitle(t *testing.T) {
 	cf := NewComponentFactory(nil, "")
 

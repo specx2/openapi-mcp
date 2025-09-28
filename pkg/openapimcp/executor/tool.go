@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -113,6 +115,10 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 		return errorHandler.HandleParseError(err), nil
 	}
 
+	log.Printf("tool %s received arguments: %v", t.tool.Name, request.Params.Arguments)
+
+	t.normalizeArguments(args)
+
 	if err := t.validateArgs(args); err != nil {
 		return errorHandler.HandleBuildError(err), nil
 	}
@@ -135,7 +141,14 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 	}
 
 	processor := NewResponseProcessor(t.outputSchema, t.wrapResult, errorHandler)
-	return processor.Process(resp)
+	callResult, err := processor.Process(resp)
+	if err != nil {
+		log.Printf("tool %s failed to process response: %v", t.tool.Name, err)
+		return nil, err
+	}
+
+	log.Printf("tool %s returning result: isError=%v structured=%v content=%v meta=%v", t.tool.Name, callResult.IsError, callResult.StructuredContent, callResult.Content, callResult.Result.Meta)
+	return callResult, nil
 }
 
 func (t *OpenAPITool) validateArgs(args map[string]interface{}) error {
@@ -146,6 +159,126 @@ func (t *OpenAPITool) validateArgs(args map[string]interface{}) error {
 		return fmt.Errorf("argument validation failed: %w", err)
 	}
 	return nil
+}
+
+func (t *OpenAPITool) normalizeArguments(args map[string]interface{}) {
+	for name, value := range args {
+		if value == nil {
+			continue
+		}
+
+		mapping, ok := t.paramMap[name]
+		if !ok {
+			continue
+		}
+
+		param := t.findRouteParameter(mapping)
+		if param == nil || param.Schema == nil {
+			continue
+		}
+
+		if coerced, changed := coerceValueForSchema(value, param.Schema); changed {
+			args[name] = coerced
+		}
+	}
+}
+
+func (t *OpenAPITool) findRouteParameter(mapping ir.ParamMapping) *ir.ParameterInfo {
+	for i := range t.route.Parameters {
+		param := &t.route.Parameters[i]
+		if param.Name == mapping.OpenAPIName && param.In == mapping.Location {
+			return param
+		}
+	}
+	return nil
+}
+
+func coerceValueForSchema(value interface{}, schema ir.Schema) (interface{}, bool) {
+	switch v := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return value, false
+		}
+		if schemaAllowsType(schema, "integer") {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+				return float64(parsed), true
+			}
+		}
+		if schemaAllowsType(schema, "number") {
+			if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+				return parsed, true
+			}
+		}
+		if schemaAllowsType(schema, "boolean") {
+			if parsed, err := strconv.ParseBool(trimmed); err == nil {
+				return parsed, true
+			}
+		}
+	case json.Number:
+		if schemaAllowsType(schema, "integer") {
+			if parsed, err := v.Int64(); err == nil {
+				return float64(parsed), true
+			}
+		}
+		if schemaAllowsType(schema, "number") {
+			if parsed, err := v.Float64(); err == nil {
+				return parsed, true
+			}
+		}
+	}
+
+	return value, false
+}
+
+func schemaAllowsType(schema ir.Schema, typ string) bool {
+	if schema == nil || typ == "" {
+		return false
+	}
+
+	if schema.Type() == typ {
+		return true
+	}
+
+	if rawTypes, ok := schema["type"].([]interface{}); ok {
+		for _, item := range rawTypes {
+			if s, ok := item.(string); ok && s == typ {
+				return true
+			}
+		}
+	}
+
+	if anyOf, ok := schema["anyOf"].([]interface{}); ok {
+		for _, candidate := range anyOf {
+			if m, ok := candidate.(map[string]interface{}); ok {
+				if schemaAllowsType(ir.Schema(m), typ) {
+					return true
+				}
+			}
+		}
+	}
+
+	if oneOf, ok := schema["oneOf"].([]interface{}); ok {
+		for _, candidate := range oneOf {
+			if m, ok := candidate.(map[string]interface{}); ok {
+				if schemaAllowsType(ir.Schema(m), typ) {
+					return true
+				}
+			}
+		}
+	}
+
+	if allOf, ok := schema["allOf"].([]interface{}); ok {
+		for _, candidate := range allOf {
+			if m, ok := candidate.(map[string]interface{}); ok {
+				if schemaAllowsType(ir.Schema(m), typ) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func buildToolMeta(route ir.HTTPRoute, tags []string) map[string]any {
