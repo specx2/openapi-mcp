@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/specx2/openapi-mcp/pkg/openapimcp"
+	"github.com/specx2/openapi-mcp/core"
 )
 
 func main() {

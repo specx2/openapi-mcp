@@ -4,8 +4,8 @@ import (
 	"log"
 	"regexp"
 
-	"github.com/specx2/openapi-mcp/pkg/openapimcp"
-	"github.com/specx2/openapi-mcp/pkg/openapimcp/mapper"
+	"github.com/specx2/openapi-mcp/core"
+	"github.com/specx2/openapi-mcp/core/mapper"
 )
 
 func main() {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
-	"github.com/specx2/openapi-mcp/pkg/openapimcp/factory"
-	"github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+	"github.com/specx2/openapi-mcp/core/executor"
+	"github.com/specx2/openapi-mcp/core/factory"
+	"github.com/specx2/openapi-mcp/core/ir"
 )
 
 // MockHTTPClient provides a minimal implementation for tool execution tests.

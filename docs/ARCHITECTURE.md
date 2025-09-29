@@ -954,7 +954,7 @@ import (
     "log"
     "os"
 
-    "github.com/specx2/openapi-mcp/pkg/openapimcp"
+    "github.com/specx2/openapi-mcp/core"
     "github.com/mark3labs/mcp-go/server"
 )
 
@@ -983,8 +983,8 @@ func main() {
 ```go
 import (
     "regexp"
-    "github.com/specx2/openapi-mcp/pkg/openapimcp"
-    "github.com/specx2/openapi-mcp/pkg/openapimcp/mapper"
+    "github.com/specx2/openapi-mcp/core"
+    "github.com/specx2/openapi-mcp/core/mapper"
 )
 
 func main() {
@@ -1021,9 +1021,9 @@ func main() {
 
 ```go
 import (
-    "github.com/specx2/openapi-mcp/pkg/openapimcp"
-    "github.com/specx2/openapi-mcp/pkg/openapimcp/factory"
-    "github.com/specx2/openapi-mcp/pkg/openapimcp/ir"
+    "github.com/specx2/openapi-mcp/core"
+    "github.com/specx2/openapi-mcp/core/factory"
+    "github.com/specx2/openapi-mcp/core/ir"
     "github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -1061,8 +1061,8 @@ import (
     "net/http"
     "time"
 
-    "github.com/specx2/openapi-mcp/pkg/openapimcp"
-    "github.com/specx2/openapi-mcp/pkg/openapimcp/executor"
+    "github.com/specx2/openapi-mcp/core"
+    "github.com/specx2/openapi-mcp/core/executor"
 )
 
 func main() {

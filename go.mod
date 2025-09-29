@@ -6,8 +6,9 @@ require (
 	github.com/mark3labs/mcp-go v0.40.0
 	github.com/pb33f/libopenapi v0.28.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.0
+	github.com/specx2/mcp-forgebird v1.1.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.2
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -21,5 +22,8 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/specx2/mcp-forgebird => ../mcp-forgebird
