@@ -26,6 +26,12 @@ func NewPipeline() interfaces.Pipeline {
 		},
 		RouteMapperBuilder: func(config interfaces.ConversionConfig) (interfaces.RouteMapper, error) {
 			mapper := NewOpenAPIRouteMapper()
+			// 应用外部传入规则；若为空则保持底层 RouteMapper 的默认（Tool-only），与 v1.0.0 一致
+			if len(config.Mapping.Rules) > 0 {
+				for _, rule := range config.Mapping.Rules {
+					mapper.AddRule(rule)
+				}
+			}
 			if len(config.Mapping.GlobalTags) > 0 {
 				mapper.WithGlobalTags(config.Mapping.GlobalTags...)
 			}
