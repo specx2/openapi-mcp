@@ -115,6 +115,78 @@ func (o *openapiOperation) GetMetadata() *interfaces.OperationMetadata {
 	return &copy
 }
 
+// GetHTTPRequestDescriptor 实现 interfaces.HTTPOperation 接口
+func (o *openapiOperation) GetHTTPRequestDescriptor() *interfaces.HTTPRequestDescriptor {
+	// 将 ir.HTTPRoute 转换为 interfaces.HTTPRequestDescriptor
+	descriptor := &interfaces.HTTPRequestDescriptor{
+		Path:        o.route.Path,
+		Method:      o.route.Method,
+		OperationID: o.route.OperationID,
+		Summary:     o.route.Summary,
+		Description: o.route.Description,
+		Tags:        append([]string(nil), o.route.Tags...),
+		Parameters:  make([]interfaces.ParameterInfo, len(o.route.Parameters)),
+		SchemaDefs:  cloneSchema(o.schemaDefs),
+		Extensions:  cloneGenericMap(o.route.Extensions),
+	}
+
+	// 转换参数
+	for i, param := range o.route.Parameters {
+		descriptor.Parameters[i] = interfaces.ParameterInfo{
+			Name:        param.Name,
+			In:          interfaces.ParameterLocation(param.In),
+			Required:    param.Required,
+			Schema:      convertIRSchemaToInterfacesSchema(param.Schema),
+			Description: param.Description,
+			Example:     param.Example,
+		}
+	}
+
+	// 转换 RequestBody
+	if o.route.RequestBody != nil {
+		descriptor.RequestBody = &interfaces.RequestBodyInfo{
+			Required:       o.route.RequestBody.Required,
+			ContentSchemas: make(map[string]interfaces.Schema),
+			Description:    o.route.RequestBody.Description,
+		}
+		for ct, schema := range o.route.RequestBody.ContentSchemas {
+			descriptor.RequestBody.ContentSchemas[ct] = convertIRSchemaToInterfacesSchema(schema)
+		}
+	}
+
+	// 转换 Responses
+	descriptor.Responses = make(map[string]interfaces.ResponseInfo)
+	for status, resp := range o.route.Responses {
+		responseInfo := interfaces.ResponseInfo{
+			Description:    resp.Description,
+			ContentSchemas: make(map[string]interfaces.Schema),
+		}
+		for ct, schema := range resp.ContentSchemas {
+			responseInfo.ContentSchemas[ct] = convertIRSchemaToInterfacesSchema(schema)
+		}
+		descriptor.Responses[status] = responseInfo
+	}
+
+	return descriptor
+}
+
+// GetParameterMappings 实现 interfaces.HTTPOperation 接口
+func (o *openapiOperation) GetParameterMappings() map[string]interfaces.ParamMapping {
+	if len(o.paramMap) == 0 {
+		return nil
+	}
+	result := make(map[string]interfaces.ParamMapping, len(o.paramMap))
+	for k, v := range o.paramMap {
+		result[k] = interfaces.ParamMapping{
+			OpenAPIName:  v.OpenAPIName,
+			Location:     interfaces.ParameterLocation(v.Location),
+			IsSuffixed:   v.IsSuffixed,
+			OriginalName: v.OriginalName,
+		}
+	}
+	return result
+}
+
 func deriveOperationID(route ir.HTTPRoute) string {
 	if route.OperationID != "" {
 		return route.OperationID
@@ -343,6 +415,18 @@ func cloneSchema(schema interfaces.Schema) interfaces.Schema {
 		clone[k] = cloneGenericValue(v)
 	}
 	return clone
+}
+
+// convertIRSchemaToInterfacesSchema 将 ir.Schema 转换为 interfaces.Schema
+func convertIRSchemaToInterfacesSchema(irSchema ir.Schema) interfaces.Schema {
+	if irSchema == nil {
+		return nil
+	}
+	result := make(interfaces.Schema, len(irSchema))
+	for k, v := range irSchema {
+		result[k] = cloneGenericValue(v)
+	}
+	return result
 }
 
 func cloneParamMap(paramMap map[string]ir.ParamMapping) map[string]ir.ParamMapping {

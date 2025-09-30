@@ -10,8 +10,9 @@ import (
 )
 
 type openapiRouteMapper struct {
-	rules      []openapimapper.RouteMap
-	globalTags []string
+	rules         []openapimapper.RouteMap
+	globalTags    []string
+	customMapFunc interfaces.MappingFunc
 }
 
 // NewOpenAPIRouteMapper constructs a mapper translating OpenAPI routes to MCP components.
@@ -43,6 +44,32 @@ func (m *openapiRouteMapper) MapOperations(operations []interfaces.Operation) ([
 	}
 
 	mapped := internal.MapRoutes(irRoutes)
+
+	// 如果有一对多映射函数，扩展结果
+	if m.customMapFunc != nil {
+		var expandedMapped []openapimapper.MappedRoute
+		for _, entry := range mapped {
+			// 首先添加原始映射
+			expandedMapped = append(expandedMapped, entry)
+
+			// 调用自定义映射函数生成额外的映射
+			op := lookup[routeKey(entry.Route)]
+			if op != nil {
+				if additional, err := m.customMapFunc(op); err == nil && additional != nil {
+					// 将额外的映射决策转换为 MappedRoute
+					additionalRoute := openapimapper.MappedRoute{
+						Route:       entry.Route,
+						MCPType:     reverseMCPType(additional.MCPType),
+						Tags:        additional.Tags,
+						Annotations: additional.Annotations,
+					}
+					expandedMapped = append(expandedMapped, additionalRoute)
+				}
+			}
+		}
+		mapped = expandedMapped
+	}
+
 	results := make([]interfaces.MappedOperation, 0, len(mapped))
 	for _, entry := range mapped {
 		op := lookup[routeKey(entry.Route)]
@@ -88,7 +115,7 @@ func (m *openapiRouteMapper) AddRule(rule interfaces.MappingRule) interfaces.Rou
 }
 
 func (m *openapiRouteMapper) WithMapFunc(fn interfaces.MappingFunc) interfaces.RouteMapper {
-	// Custom mapping functions are not currently supported for the OpenAPI plugin.
+	m.customMapFunc = fn
 	return m
 }
 

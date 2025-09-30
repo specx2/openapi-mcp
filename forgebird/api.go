@@ -2,7 +2,10 @@ package forgebird
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,19 +29,47 @@ func NewPipeline() interfaces.Pipeline {
 		},
 		RouteMapperBuilder: func(config interfaces.ConversionConfig) (interfaces.RouteMapper, error) {
 			mapper := NewOpenAPIRouteMapper()
-			// 应用外部传入规则；若为空则保持底层 RouteMapper 的默认（Tool-only），与 v1.0.0 一致
-			if len(config.Mapping.Rules) > 0 {
+
+			// 如果没有外部传入规则，使用智能映射规则（所有 GET -> ResourceTemplate，其他 -> Tool）
+			if len(config.Mapping.Rules) == 0 {
+				// 添加智能映射规则：所有 GET 请求都生成 ResourceTemplate（因为可能有查询参数）
+				smartRules := []interfaces.MappingRule{
+					{
+						Methods:     []string{"*"},
+						PathPattern: regexp.MustCompile(".*"),
+						MCPType:     interfaces.MCPTypeTool,
+					},
+				}
+				for _, rule := range smartRules {
+					mapper = mapper.AddRule(rule)
+				}
+			} else {
+				// 应用外部传入规则
 				for _, rule := range config.Mapping.Rules {
-					mapper.AddRule(rule)
+					mapper = mapper.AddRule(rule)
 				}
 			}
+
 			if len(config.Mapping.GlobalTags) > 0 {
-				mapper.WithGlobalTags(config.Mapping.GlobalTags...)
+				mapper = mapper.WithGlobalTags(config.Mapping.GlobalTags...)
 			}
+
+			// 启用一对多映射：GET 请求同时生成 Tool 和 ResourceTemplate
+			mapper = mapper.WithMapFunc(func(operation interfaces.Operation) (*interfaces.MappingDecision, error) {
+				// 明确的一对多映射逻辑：为 GET 请求额外生成 ResourceTemplate
+				if metadata := operation.GetMetadata(); metadata != nil && metadata.Method == "GET" {
+					return &interfaces.MappingDecision{
+						MCPType: interfaces.MCPTypeResourceTemplate,
+						Tags:    operation.GetTags(),
+					}, nil
+				}
+				return nil, nil
+			})
+
 			return mapper, nil
 		},
 		ToolAnnotationStrategy:      factory.NewHTTPToolAnnotationStrategy(),
-		ComponentDescriptorStrategy: factory.NewHTTPComponentDescriptorStrategy(),
+		ComponentDescriptorStrategy: NewOpenAPIMCPDescriptorStrategy(), // 使用 openapi-mcp 自己的策略，支持 RFC 6570 查询参数
 	}
 }
 
@@ -110,6 +141,17 @@ type TemplateHandler func(ctx context.Context, req mcp.ReadResourceRequest, comp
 
 // DefaultToolHandler 默认工具处理
 func DefaultToolHandler(ctx context.Context, req mcp.CallToolRequest, component interfaces.MCPComponent, opts ...HandlerOption) (*mcp.CallToolResult, error) {
+	// 解析 handler 配置选项
+	cfg := &handlerConfig{}
+	for _, opt := range opts {
+		opt.applyHandler(cfg)
+	}
+
+	// 如果有自定义 HTTP 客户端，通过 context 传递
+	if cfg.HTTPClient != nil {
+		ctx = context.WithValue(ctx, "custom_http_client", cfg.HTTPClient)
+	}
+
 	op := component.GetOperation()
 	if oa, ok := AsOpenAPIOperation(op); ok {
 		if t := oa.OpenAPITool(); t != nil {
@@ -176,7 +218,7 @@ func DefaultTemplateHandler(ctx context.Context, req mcp.ReadResourceRequest, co
 	if !ok {
 		return nil, fmt.Errorf("not an openapi operation")
 	}
-	params := extractParametersFromURI(req.Params.URI, tpl.URITemplate.Template.Raw())
+	params := ExtractParametersFromURI(req.Params.URI, tpl.URITemplate.Template.Raw())
 	reader := executorpkg.NewOpenAPIParameterizedResource(tpl.Name, tpl.Description, oa.Route(), cfg.HTTPClient, cfg.BaseURL, params)
 	text, err := reader.Read(ctx)
 	if err != nil {
@@ -244,11 +286,70 @@ func RegisterComponents(server *srv.MCPServer, components []interfaces.MCPCompon
 			}
 			server.AddResourceTemplate(*tpl, h)
 
+			// 同时将 ResourceTemplate 注册为 Resource，以便在 resources/list 中显示
+			resourceURI := buildResourceURIFromTemplate(tpl)
+			resource := mcp.Resource{
+				URI:         resourceURI,
+				Name:        tpl.Name,
+				Description: tpl.Description,
+				MIMEType:    tpl.MIMEType,
+				Meta:        tpl.Meta,
+			}
+			// 复制 Annotations（嵌入的 Annotated 字段）
+			resource.Annotated = tpl.Annotated
+
+			// Resource handler: 与 Template handler 相同
+			resourceHandler := func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+				return tplHandler(ctx, req, component, hOpts...)
+			}
+			server.AddResource(resource, resourceHandler)
+
 		default:
 			return fmt.Errorf("unsupported component type: %s", component.GetType())
 		}
 	}
+
+	// 打印注册统计信息
+	printRegistrationSummary(server)
+
 	return nil
+}
+
+// printRegistrationSummary 打印注册到 server 的所有组件
+func printRegistrationSummary(server *srv.MCPServer) {
+	ctx := context.Background()
+
+	log.Println("========================================")
+	log.Println("=== MCP Server Registration Summary ===")
+	log.Println("========================================")
+
+	// 1. 打印 tools/list - 完整的 tool 对象
+	registeredTools := server.ListTools()
+	log.Printf("[Tools/List] Total: %d", len(registeredTools))
+	for name, serverTool := range registeredTools {
+		toolJSON, _ := json.MarshalIndent(serverTool.Tool, "", "  ")
+		log.Printf("Tool [%s]:\n%s", name, string(toolJSON))
+	}
+
+	// 2. 打印 resources/list - 完整的响应 JSON
+	listResourcesMessage := `{"jsonrpc": "2.0", "id": 1, "method": "resources/list"}`
+	resourceResponse := server.HandleMessage(ctx, []byte(listResourcesMessage))
+	if resourceResponse != nil {
+		resourceJSON, _ := json.MarshalIndent(resourceResponse, "", "  ")
+		log.Printf("\n[Resources/List] Response:\n%s", string(resourceJSON))
+	}
+
+	// 3. 打印 resources/templates/list - 完整的响应 JSON
+	listTemplatesMessage := `{"jsonrpc": "2.0", "id": 2, "method": "resources/templates/list"}`
+	templateResponse := server.HandleMessage(ctx, []byte(listTemplatesMessage))
+	if templateResponse != nil {
+		templateJSON, _ := json.MarshalIndent(templateResponse, "", "  ")
+		log.Printf("\n[Resources/Templates/List] Response:\n%s", string(templateJSON))
+	}
+
+	log.Println("========================================")
+	log.Println("=== Registration Complete ===")
+	log.Println("========================================")
 }
 
 func executionResultToCallToolResult(result *interfaces.ExecutionResult) *mcp.CallToolResult {
@@ -301,24 +402,98 @@ func mapToMeta(fields map[string]interface{}) *mcp.Meta {
 	return mcp.NewMetaFromMap(fields)
 }
 
-func extractParametersFromURI(uri string, template string) map[string]string {
+func ExtractParametersFromURI(uri string, template string) map[string]string {
 	if strings.TrimSpace(template) == "" {
 		return map[string]string{}
 	}
+
 	uri = strings.TrimPrefix(uri, "resource://")
 	template = strings.TrimPrefix(template, "resource://")
-	uriSeg := strings.Split(uri, "/")
-	tplSeg := strings.Split(template, "/")
+
 	params := make(map[string]string)
-	if len(uriSeg) != len(tplSeg) {
-		return params
+
+	// 分离路径和查询字符串部分
+	var uriPath, uriQuery string
+	if queryIndex := strings.Index(uri, "?"); queryIndex != -1 {
+		uriPath = uri[:queryIndex]
+		uriQuery = uri[queryIndex+1:]
+	} else {
+		uriPath = uri
 	}
-	for i, seg := range tplSeg {
-		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
-			key := strings.TrimSuffix(strings.TrimPrefix(seg, "{"), "}")
-			params[key] = uriSeg[i]
+
+	// 处理模板：可能是 RFC 6570 格式 (path{?param1,param2}) 或旧格式 (path?param1={param1})
+	var tplPath string
+	var expectedParams []string
+
+	// 检查是否是 RFC 6570 格式：{?param1,param2}
+	if idx := strings.Index(template, "{?"); idx != -1 {
+		tplPath = template[:idx]
+		// 提取参数名列表
+		endIdx := strings.Index(template[idx:], "}")
+		if endIdx != -1 {
+			paramList := template[idx+2 : idx+endIdx]
+			expectedParams = strings.Split(paramList, ",")
+		}
+	} else {
+		// 旧格式或没有查询参数
+		if queryIndex := strings.Index(template, "?"); queryIndex != -1 {
+			tplPath = template[:queryIndex]
+		} else {
+			tplPath = template
 		}
 	}
+
+	// 处理路径参数（路径中的 {id} 这种）
+	uriSeg := strings.Split(uriPath, "/")
+	tplSeg := strings.Split(tplPath, "/")
+	if len(uriSeg) == len(tplSeg) {
+		for i, seg := range tplSeg {
+			if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+				key := strings.TrimSuffix(strings.TrimPrefix(seg, "{"), "}")
+				params[key] = uriSeg[i]
+			}
+		}
+	}
+
+	// 处理查询参数
+	if uriQuery != "" {
+		// 解析实际 URI 的查询参数
+		queryParams := make(map[string]string)
+		for _, param := range strings.Split(uriQuery, "&") {
+			if equalsIndex := strings.Index(param, "="); equalsIndex != -1 {
+				name := param[:equalsIndex]
+				value := param[equalsIndex+1:]
+				queryParams[name] = value
+			}
+		}
+
+		// 如果有期望的参数列表（RFC 6570 格式），则匹配
+		if len(expectedParams) > 0 {
+			for _, expectedParam := range expectedParams {
+				expectedParam = strings.TrimSpace(expectedParam)
+				if value, exists := queryParams[expectedParam]; exists {
+					// 检查是否是 Header 参数
+					if strings.HasPrefix(expectedParam, "__header__") {
+						actualParamName := strings.TrimPrefix(expectedParam, "__header__")
+						params[actualParamName] = value
+					} else {
+						params[expectedParam] = value
+					}
+				}
+			}
+		} else {
+			// 旧格式或直接使用所有查询参数
+			for name, value := range queryParams {
+				if strings.HasPrefix(name, "__header__") {
+					actualParamName := strings.TrimPrefix(name, "__header__")
+					params[actualParamName] = value
+				} else {
+					params[name] = value
+				}
+			}
+		}
+	}
+
 	return params
 }
 
@@ -327,4 +502,42 @@ func valueOrDefault(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// buildResourceURIFromTemplate 从 ResourceTemplate 构建固定的 Resource URI
+func buildResourceURIFromTemplate(tpl *mcp.ResourceTemplate) string {
+	if tpl == nil || tpl.URITemplate == nil {
+		log.Printf("[buildResourceURIFromTemplate] tpl or URITemplate is nil")
+		return "resource://unknown"
+	}
+
+	// 使用模板的原始字符串作为 URI，保留查询参数部分
+	// 例如: "users{?page,limit}" -> "resource://users{?page,limit}"
+	//      "users/{id}" -> "resource://users/{id}"
+	templateStr := tpl.URITemplate.Template.Raw()
+	log.Printf("[buildResourceURIFromTemplate] Template.Raw() returned: %s", templateStr)
+
+	if templateStr == "" {
+		log.Printf("[buildResourceURIFromTemplate] Template is empty, using name: %s", tpl.Name)
+		templateStr = tpl.Name
+	}
+
+	// 如果已经有 resource:// 前缀，直接使用
+	if strings.HasPrefix(templateStr, "resource://") {
+		log.Printf("[buildResourceURIFromTemplate] Already has resource:// prefix, returning: %s", templateStr)
+		return templateStr
+	}
+
+	// 否则添加 resource:// 前缀，保留完整的模板字符串
+	result := fmt.Sprintf("resource://%s", strings.TrimPrefix(templateStr, "/"))
+	log.Printf("[buildResourceURIFromTemplate] Final URI: %s", result)
+
+	// 检查是否保留了查询参数
+	if strings.Contains(templateStr, "{?") {
+		log.Printf("[buildResourceURIFromTemplate] ✓ Query parameters preserved in URI")
+	} else {
+		log.Printf("[buildResourceURIFromTemplate] ⚠️ No query parameters in template (may be expected)")
+	}
+
+	return result
 }

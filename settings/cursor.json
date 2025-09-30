@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "simple-test": {
+      "command": "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/simple-mcp-test",
+      "args": []
+    },
+    "gigasdk-openapi": {
+      "command": "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/gigasdk-mcp-server",
+      "args": [
+        "-spec",
+        "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/test/_gigasdk/spec/projectManage.swagger.yaml",
+        "-spec",
+        "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/test/_gigasdk/spec/channelManage.swagger.yaml",
+        "-spec",
+        "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/test/_gigasdk/spec/operationManage.swagger.yaml",
+        "-base-url",
+        "http://127.0.0.1:8000",
+        "-log-output",
+        "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp/test/_gigasdk/run/logs/server.log",
+        "-log-tee-console"
+      ],
+      "cwd": "/Users/tu/Desktop/CodeHouse/specx2/openapi-mcp",
+      "env": {
+        "GIGASDK_DEV_KEY": "_localmcp_",
+        "GIGASDK_DEV_SECRET": "xxxlocalmcp666xxx",
+        "GIGASDK_DEV_USERNAME": "jinyichen"
+      }
+    }
+  }
+}

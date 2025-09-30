@@ -135,7 +135,13 @@ func (t *OpenAPITool) Run(ctx context.Context, request mcp.CallToolRequest) (*mc
 		}
 	}
 
-	resp, err := t.client.Do(httpReq)
+	// 检查是否有自定义 HTTP 客户端通过 context 传递
+	var client HTTPClient = t.client
+	if customClient, ok := ctx.Value("custom_http_client").(*DefaultHTTPClient); ok {
+		client = customClient
+	}
+
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return errorHandler.HandleHTTPError(err), nil
 	}
