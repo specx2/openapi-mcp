@@ -1,176 +1,341 @@
-# OpenAPI MCP - OpenAPI to MCP Framework in Go
+# OpenAPI MCP
 
-A Go framework that converts OpenAPI specifications into MCP (Model Context Protocol) servers, built on top of mcp-go and inspired by Python's fastmcp.FastMCPOpenAPI.
+[![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue.svg)](https://golang.org/dl/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 🚧 Current Status
+OpenAPI MCP is a Go framework that converts OpenAPI specifications (Swagger) into MCP (Model Context Protocol) servers. It enables seamless integration of existing REST APIs with AI models through the Model Context Protocol.
 
-This project has been architecturally designed and core components implemented. The framework provides:
+[中文文档](README_CN.md)
 
-- **Complete Architecture**: Clean separation between parsing, mapping, and execution layers
-- **OpenAPI 3.0/3.1 Support**: Comprehensive OpenAPI specification parsing
-- **Flexible Route Mapping**: Convert OpenAPI operations to MCP Tools, Resources, or ResourceTemplates
-- **Type-Safe Implementation**: Leveraging Go's type system for reliability
-- **Extensible Design**: Pluggable components for custom behavior
+## 🚀 Features
 
-## ✅ Completed Components
+- **Multiple Protocol Support**: OpenAPI 3.0 and 3.1 specifications
+- **Built on Forgebird**: Leverages the powerful [mcp-forgebird](https://github.com/specx2/mcp-forgebird) framework
+- **Flexible Mapping**: Convert OpenAPI operations to MCP Tools, Resources, or ResourceTemplates
+- **Dual Transport Modes**: Support for stdio (CLI) and SSE (HTTP server) modes
+- **RFC 6570 URI Templates**: Full support for parameterized resource URIs
+- **Custom Authentication**: Pluggable HTTP client for custom authentication logic
+- **Multi-Spec Support**: Load and serve multiple OpenAPI specifications simultaneously
 
-- [x] **Architecture Design** - Comprehensive system design with clear separation of concerns
-- [x] **IR (Intermediate Representation)** - OpenAPI to internal representation conversion
-- [x] **OpenAPI Parser** - Support for both OpenAPI 3.0 and 3.1 specifications
-- [x] **Route Mapper** - Flexible mapping with regex patterns, tags, and methods
-- [x] **Component Factory** - Schema combination with collision detection
-- [x] **Request Builder & Executor** - HTTP request construction and execution
-- [x] **MCP Integration** - OpenAPITool, OpenAPIResource, and OpenAPIResourceTemplate
+## 📦 Installation
 
-## 🏗️ Architecture Overview
-
-```
-OpenAPI Spec → Parser → HTTPRoute (IR) → Mapper → Factory → MCP Components
-                                                              ↓
-                                                      mcp-go Server
+```bash
+go get github.com/specx2/openapi-mcp
 ```
 
-### Key Components
+## 🎯 Quick Start
 
-1. **Parser Layer** (`pkg/openapimcp/parser/`)
-   - OpenAPI 3.0/3.1 parsing with libopenapi
-   - Reference resolution and schema conversion
-   - Version-specific handling for nullable fields
-
-2. **Intermediate Representation** (`pkg/openapimcp/ir/`)
-   - HTTPRoute structure representing parsed operations
-   - Parameter, request body, and response definitions
-   - Schema definitions and extensions
-
-3. **Route Mapping** (`pkg/openapimcp/mapper/`)
-   - Configurable mapping rules (method, path pattern, tags)
-   - Convert operations to Tools, Resources, or ResourceTemplates
-   - Custom mapping functions for advanced scenarios
-
-4. **Component Factory** (`pkg/openapimcp/factory/`)
-   - Schema combination with parameter collision handling
-   - Output schema extraction and wrapping
-   - Name generation and deduplication
-
-5. **Execution Layer** (`pkg/openapimcp/executor/`)
-   - RequestBuilder for HTTP request construction
-   - Parameter serialization (query, path, header, body)
-   - ResponseProcessor for result handling
-
-## 📖 Intended Usage
+### Basic Usage
 
 ```go
 package main
 
 import (
     "context"
+    "log"
     "os"
 
-    "github.com/specx2/openapi-mcp/core"
-    "github.com/specx2/openapi-mcp/core/mapper"
+    mcpsrv "github.com/mark3labs/mcp-go/server"
+    "github.com/specx2/openapi-mcp/forgebird"
+    "github.com/specx2/mcp-forgebird/core"
+    "github.com/specx2/mcp-forgebird/core/interfaces"
 )
 
 func main() {
-    // Load OpenAPI spec
-    spec, err := os.ReadFile("petstore.json")
+    // Load OpenAPI specification
+    specBytes, err := os.ReadFile("petstore.yaml")
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
-    // Create server with custom configuration
-    server, err := openapimcp.NewServer(spec,
-        openapimcp.WithBaseURL("https://petstore.swagger.io/v1"),
-        openapimcp.WithRouteMaps(mapper.SmartRouteMappings()),
-        openapimcp.WithCustomNames(map[string]string{
-            "listPets": "get_all_pets",
-        }),
-    )
+    // Create Forgebird pipeline with custom mapping strategy
+    pipeline := forgebird.NewPipeline()
+    fb := core.NewForgebird(pipeline)
+
+    // Convert OpenAPI spec to MCP components
+    components, err := fb.ConvertSpec(specBytes, interfaces.ConversionConfig{
+        BaseURL: "https://petstore.swagger.io/v1",
+        Timeout: 15,
+        Spec:    interfaces.SpecConfig{SpecURL: "petstore.yaml"},
+    })
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
-    // Serve via different transports
-    // server.Serve(server.NewStdioTransport())      // CLI
-    // server.Serve(server.NewHTTPTransport(":8080")) // HTTP
+    // Create and register MCP server
+    mserver := mcpsrv.NewMCPServer("petstore-mcp", "1.0.0")
+    if err := forgebird.RegisterComponents(mserver, components); err != nil {
+        log.Fatal(err)
+    }
+
+    // Start server in stdio mode
+    stdio := mcpsrv.NewStdioServer(mserver)
+    stdio.Listen(context.Background(), os.Stdin, os.Stdout)
 }
 ```
 
-## 🎯 Features Implemented
+### Using the CLI
 
-### Route Mapping Strategies
+```bash
+# stdio mode (default)
+openapi-mcp -spec petstore.yaml -base-url https://api.example.com
+
+# SSE mode (HTTP server)
+openapi-mcp -spec petstore.yaml -base-url https://api.example.com -sse -sse-addr :8080
+
+# Multiple specs
+openapi-mcp -spec spec1.yaml -spec spec2.yaml -base-url https://api.example.com
+
+# With custom logging
+openapi-mcp -spec petstore.yaml -log-output server.log -log-tee-console
+```
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐
+│ OpenAPI Spec    │
+│ (YAML/JSON)     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Forgebird       │
+│ Pipeline        │
+│ - Parser        │
+│ - RouteMapper   │
+│ - Factory       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ MCP Components  │
+│ - Tools         │
+│ - Resources     │
+│ - Templates     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ MCP Server      │
+│ (mcp-go)        │
+└─────────────────┘
+```
+
+### Core Layers
+
+1. **Parser Layer** (`forgebird/parser.go`)
+   - OpenAPI specification parsing and validation
+   - Support for both OpenAPI 3.0 and 3.1
+   - Schema reference resolution
+
+2. **Mapping Layer** (`forgebird/route_mapper.go`)
+   - Convert OpenAPI operations to MCP component types
+   - Default: GET requests → Tool + ResourceTemplate, Others → Tool
+   - Customizable mapping rules via pipeline configuration
+
+3. **Factory Layer** (`mcp-forgebird/core/factory`)
+   - Generate MCP Tool, Resource, and ResourceTemplate definitions
+   - Schema combination and parameter collision handling
+   - JSON Schema generation from OpenAPI schemas
+
+4. **Executor Layer** (`core/executor`)
+   - HTTP request construction from MCP tool calls
+   - Parameter serialization (path, query, header, body)
+   - Response processing and validation
+
+5. **Registration Layer** (`forgebird/api.go`)
+   - Register MCP components with mcp-go server
+   - Handle Tool execution and Resource fetching
+   - URI template matching for ResourceTemplates
+
+## 🎨 Mapping Strategies
+
+### Default Mapping (One-to-Many)
+
+By default, GET requests generate both a Tool and a ResourceTemplate, while other methods generate only Tools:
+
+```yaml
+GET /pets/{id}          → Tool: get_api_pets_id + ResourceTemplate: resource://api/pets/{id}{?param1,param2}
+POST /pets              → Tool: post_api_pets
+PUT /pets/{id}          → Tool: put_api_pets_id
+DELETE /pets/{id}       → Tool: delete_api_pets_id
+```
+
+### Custom Mapping
+
+You can customize the mapping strategy in the pipeline:
 
 ```go
-// Smart mapping: GET with params → ResourceTemplate, GET without → Resource, others → Tool
-mapper.SmartRouteMappings()
+pipeline := forgebird.NewPipeline()
 
-// Everything as tools
-mapper.ToolOnlyMappings()
+// Customize the route mapper
+customMapper := &forgebird.RouteMapper{
+    // Your custom mapping logic
+}
+pipeline.SetRouteMapper(customMapper)
+```
 
-// Custom mapping
-[]mapper.RouteMap{
-    {
-        Methods:     []string{"GET"},
-        PathPattern: regexp.MustCompile(`.*\{.*\}.*`),
-        MCPType:     mapper.MCPTypeResourceTemplate,
-    },
+## 🔧 Advanced Usage
+
+### Custom Authentication
+
+```go
+package main
+
+import (
+    "net/http"
+
+    "github.com/specx2/openapi-mcp/core/executor"
+    "github.com/specx2/openapi-mcp/forgebird"
+)
+
+// Custom HTTP client with authentication
+type AuthClient struct {
+    client *http.Client
+    apiKey string
+}
+
+func (c *AuthClient) Do(req *http.Request) (*http.Response, error) {
+    req.Header.Set("Authorization", "Bearer "+c.apiKey)
+    return c.client.Do(req)
+}
+
+func main() {
+    // Create authenticated client
+    authClient := &AuthClient{
+        client: &http.Client{Timeout: 15 * time.Second},
+        apiKey: "your-api-key",
+    }
+
+    // Wrap with DefaultHTTPClient
+    httpClient := executor.NewDefaultHTTPClientFrom(authClient)
+
+    // Register components with custom client
+    forgebird.RegisterComponents(
+        mserver,
+        components,
+        forgebird.WithHTTPClient(httpClient),
+    )
 }
 ```
 
-### Parameter Handling
+### Multi-Spec Server
 
-- **Collision Detection**: Automatic suffixing when parameter names conflict
-- **Style Support**: Form, simple, deepObject parameter serialization
-- **Type Conversion**: Proper handling of arrays, objects, and primitives
+```go
+// Load multiple specs
+specs := []string{
+    "users-api.yaml",
+    "products-api.yaml",
+    "orders-api.yaml",
+}
 
-### Schema Processing
+for _, specPath := range specs {
+    specBytes, _ := os.ReadFile(specPath)
+    components, _ := fb.ConvertSpec(specBytes, config)
+    forgebird.RegisterComponents(mserver, components)
+}
+```
 
-- **Reference Resolution**: Automatic $ref resolution
-- **Schema Combination**: Merging parameters and request body schemas
-- **Output Wrapping**: Non-object responses wrapped in `{"result": ...}`
+### SSE Mode with Custom Configuration
 
-## 🔧 Development Status
+```go
+// Create SSE server with custom options
+sseServer := mcpsrv.NewSSEServer(
+    mserver,
+    mcpsrv.WithBaseURL("https://example.com"),
+    mcpsrv.WithKeepAlive(true),
+)
 
-The framework architecture is complete and the core implementation is functional. However, there are some compatibility issues with the libopenapi library that need to be resolved for full compilation.
-
-### Next Steps
-
-1. **Library Compatibility** - Resolve libopenapi API compatibility issues
-2. **Transport Integration** - Complete mcp-go transport integration
-3. **Testing Suite** - Comprehensive test coverage
-4. **Documentation** - Complete API documentation and examples
+// Start on custom port
+if err := sseServer.Start(":8080"); err != nil {
+    log.Fatal(err)
+}
+```
 
 ## 📁 Project Structure
 
 ```
 openapi-mcp/
-├── pkg/openapimcp/
-│   ├── server.go              # Main server implementation
-│   ├── options.go             # Configuration options
-│   ├── parser/                # OpenAPI parsing
-│   ├── ir/                    # Intermediate representation
+├── cmd/
+│   └── openapi-mcp/          # CLI application
+│       ├── main.go            # Entry point
+│       └── server/            # Server implementation
+├── core/
+│   ├── executor/              # Request execution layer
+│   │   ├── builder.go         # HTTP request construction
+│   │   ├── processor.go       # Response processing
+│   │   ├── tool.go            # Tool executor
+│   │   ├── resource.go        # Resource executor
+│   │   └── template.go        # ResourceTemplate executor
+│   ├── factory/               # Component factory
+│   │   ├── factory.go         # Component generation
+│   │   ├── schema.go          # Schema processing
+│   │   └── naming.go          # Name generation
 │   ├── mapper/                # Route mapping
-│   ├── factory/               # Component generation
-│   ├── executor/              # Request execution
-│   └── internal/              # Internal utilities
+│   │   ├── mapper.go          # Core mapper logic
+│   │   └── defaults.go        # Default mappings
+│   ├── parser/                # OpenAPI parsing
+│   │   ├── parser.go          # Main parser
+│   │   ├── openapi30.go       # OpenAPI 3.0 support
+│   │   └── openapi31.go       # OpenAPI 3.1 support
+│   └── server.go              # Main server implementation
+├── forgebird/                 # Forgebird integration
+│   ├── api.go                 # Registration API
+│   ├── parser.go              # Forgebird parser adapter
+│   ├── route_mapper.go        # Forgebird route mapper
+│   ├── descriptor_strategy.go # URI template generation
+│   └── operation.go           # Operation wrapper
 ├── examples/
-│   ├── basic/                 # Basic usage example
-│   ├── petstore/              # Petstore API example
-│   └── custom_mapping/        # Custom mapping example
-├── docs/
-│   └── ARCHITECTURE.md        # Detailed architecture design
-└── test/                      # Test files
+│   └── basic/                 # Usage examples
+└── test/
+    └── _gigasdk/              # Integration tests
+        └── cmd/server/        # Test server with auth
 ```
 
-## 🎯 Goals Achieved
+## 🧪 Testing
 
-- [x] **Clean Architecture** - Modular design with clear separation of concerns
-- [x] **Go Idioms** - Following Go best practices and patterns
-- [x] **mcp-go Integration** - Built on top of mcp-go framework
-- [x] **FastMCP Compatibility** - Feature parity with Python fastmcp.FastMCPOpenAPI
-- [x] **Extensibility** - Pluggable components for customization
-- [x] **Type Safety** - Leveraging Go's type system
-- [x] **Comprehensive Documentation** - Detailed design and implementation docs
+```bash
+# Run all tests
+go test ./...
 
-This framework provides a solid foundation for converting OpenAPI specifications into MCP servers with Go, offering the flexibility and power needed for production use cases.
+# Run tests with coverage
+go test -cover ./...
 
----
+# Run specific test
+go test -v ./core/executor/...
+```
+
+## 📚 Examples
+
+See the [examples](examples/) directory for complete examples:
+
+- [Basic Usage](examples/basic/main.go) - Simple petstore example
+- [GigaSDK Integration](test/_gigasdk/cmd/server/main.go) - Real-world integration with custom authentication
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔗 Related Projects
+
+- [mcp-forgebird](https://github.com/specx2/mcp-forgebird) - The underlying framework for MCP component generation
+- [mcp-go](https://github.com/mark3labs/mcp-go) - Go implementation of Model Context Protocol
+- [fastmcp](https://github.com/jlowin/fastmcp) - Python FastMCP framework (inspiration)
+
+## 📖 Documentation
+
+- [Architecture Design](docs/ARCHITECTURE.md) - Detailed architecture documentation
+- [API Reference](https://pkg.go.dev/github.com/specx2/openapi-mcp) - Go package documentation
+- [MCP Specification](https://spec.modelcontextprotocol.io/) - Model Context Protocol specification
+
+## 🙏 Acknowledgments
+
+Special thanks to:
+- [mcp-go](https://github.com/mark3labs/mcp-go) team for the excellent MCP implementation
+- [libopenapi](https://github.com/pb33f/libopenapi) for OpenAPI parsing capabilities
+- [fastmcp](https://github.com/jlowin/fastmcp) for design inspiration
