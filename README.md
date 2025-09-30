@@ -174,16 +174,3 @@ openapi-mcp/
 This framework provides a solid foundation for converting OpenAPI specifications into MCP servers with Go, offering the flexibility and power needed for production use cases.
 
 ---
-
-## Original Requirements (Chinese)
-
-### 项目开发须知
-目标是使用 golang 开发一个 openapi 到 mcp 的框架，其开发基于 mcp-go 三方依赖，所具备的能力应该完全参考 python 的 mcp 框架 fastmcp 的 FastMCP.from_openapi() 方法得到的 FastMCPOpenAPI 类。优先参考 fastmcp.experimental.server.openapi 目录下的 FastMCPOpenAPI 类，即使用最新的实现。
-
-### 要求清单
-- [x] 要求必须使用 mcp-go 进行进一步开发，mcp-go 的源代码我已经放在了工作目录，你可以在存在问题时进行阅读
-- [x] 要求完全实现 FastMCPOpenAPI 的能力，fastmcp 的源代码我也已经放在了工作目录，你可以随时进行阅读
-- [x] 开发前先通读代码，进行项目架构规划，要求架构清晰，结构合理，兼具整洁与可拓展性
-- [x] 避免生搬硬套，而是寻找最合理，最适合 golang，最清晰，最能与 mcp-go 依赖有机结合的最佳实践
-- [x] 开发过程必须全程进行记录，且每个模块，每个部分都需要有相应的设计以及说明文档
-- [x] 最终的实现效果，必须好用，稳定，兼容性足够强，且具备足够的可拓展性
