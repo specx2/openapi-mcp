@@ -54,10 +54,11 @@ func (openAPIMCPDescriptorStrategy) BuildResourceURI(operation interfaces.Operat
 }
 
 // BuildResourceTemplateURI 构建资源模板 URI，包含 RFC 6570 查询参数
+// 根据 MCP 协议标准，URI 应该包含 resource:// 前缀
 func (openAPIMCPDescriptorStrategy) BuildResourceTemplateURI(operation interfaces.Operation) string {
 	metadata := operation.GetMetadata()
 	if metadata == nil || metadata.Path == "" {
-		return operation.GetName()
+		return "resource://" + operation.GetName()
 	}
 
 	base := strings.TrimPrefix(metadata.Path, "/")
@@ -65,12 +66,12 @@ func (openAPIMCPDescriptorStrategy) BuildResourceTemplateURI(operation interface
 	// 尝试从 HTTPOperation 获取参数信息
 	httpOp, ok := operation.(interfaces.HTTPOperation)
 	if !ok {
-		return base
+		return "resource://" + base
 	}
 
 	descriptor := httpOp.GetHTTPRequestDescriptor()
 	if descriptor == nil || len(descriptor.Parameters) == 0 {
-		return base
+		return "resource://" + base
 	}
 
 	// 收集查询参数和 Header 参数
@@ -79,10 +80,10 @@ func (openAPIMCPDescriptorStrategy) BuildResourceTemplateURI(operation interface
 
 	for _, param := range descriptor.Parameters {
 		if param.In == interfaces.ParameterInQuery {
-			queryParams = append(queryParams, param.Name)
+			queryParams = append(queryParams, sanitizeParamName(param.Name))
 		} else if param.In == interfaces.ParameterInHeader {
-			// Header 参数使用特殊前缀
-			headerParams = append(headerParams, "__header__"+param.Name)
+			// Header 参数使用特殊前缀，并将破折号替换为下划线（RFC 6570 不允许破折号）
+			headerParams = append(headerParams, "__header__"+sanitizeParamName(param.Name))
 		}
 	}
 
@@ -94,7 +95,14 @@ func (openAPIMCPDescriptorStrategy) BuildResourceTemplateURI(operation interface
 		base += "{?" + strings.Join(allParams, ",") + "}"
 	}
 
-	return base
+	return "resource://" + base
+}
+
+// sanitizeParamName 将参数名转换为 RFC 6570 兼容格式
+// RFC 6570 变量名只允许: ALPHA / DIGIT / "_" / pct-encoded
+func sanitizeParamName(name string) string {
+	// 将破折号替换为下划线
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 func (openAPIMCPDescriptorStrategy) BuildMeta(operation interfaces.Operation, mcpType interfaces.MCPType, tags []string) map[string]interface{} {

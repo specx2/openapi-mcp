@@ -220,12 +220,26 @@ func (pr *OpenAPIParameterizedResource) buildParameterizedURL() (string, error) 
 
 	for _, param := range pr.route.Parameters {
 		if param.In == ir.ParameterInQuery {
-			if paramValue, exists := pr.params[param.Name]; exists && paramValue != "" {
+			// 尝试使用原始名称，如果不存在则尝试 sanitized 名称（下划线版本）
+			paramValue, exists := pr.params[param.Name]
+			if !exists {
+				// 尝试 sanitized 版本（破折号替换为下划线）
+				sanitizedName := strings.ReplaceAll(param.Name, "-", "_")
+				paramValue, exists = pr.params[sanitizedName]
+			}
+			if exists && paramValue != "" {
 				queryParts = append(queryParts, fmt.Sprintf("%s=%s", param.Name, paramValue))
 			}
 			// 如果参数为空，不添加到查询字符串中（使用默认值）
 		} else if param.In == ir.ParameterInHeader {
-			if paramValue, exists := pr.params[param.Name]; exists && paramValue != "" {
+			// 尝试使用原始名称，如果不存在则尝试 sanitized 名称（下划线版本）
+			paramValue, exists := pr.params[param.Name]
+			if !exists {
+				// 尝试 sanitized 版本（破折号替换为下划线）
+				sanitizedName := strings.ReplaceAll(param.Name, "-", "_")
+				paramValue, exists = pr.params[sanitizedName]
+			}
+			if exists && paramValue != "" {
 				headerParams[param.Name] = paramValue
 			}
 			// Header 参数不添加到 URL 查询字符串中

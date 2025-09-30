@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -472,23 +473,37 @@ func ExtractParametersFromURI(uri string, template string) map[string]string {
 			for _, expectedParam := range expectedParams {
 				expectedParam = strings.TrimSpace(expectedParam)
 				if value, exists := queryParams[expectedParam]; exists {
+					// URL 解码参数值
+					decodedValue, err := url.QueryUnescape(value)
+					if err != nil {
+						// 如果解码失败，使用原始值
+						decodedValue = value
+					}
+
 					// 检查是否是 Header 参数
 					if strings.HasPrefix(expectedParam, "__header__") {
 						actualParamName := strings.TrimPrefix(expectedParam, "__header__")
-						params[actualParamName] = value
+						params[actualParamName] = decodedValue
 					} else {
-						params[expectedParam] = value
+						params[expectedParam] = decodedValue
 					}
 				}
 			}
 		} else {
 			// 旧格式或直接使用所有查询参数
 			for name, value := range queryParams {
+				// URL 解码参数值
+				decodedValue, err := url.QueryUnescape(value)
+				if err != nil {
+					// 如果解码失败，使用原始值
+					decodedValue = value
+				}
+
 				if strings.HasPrefix(name, "__header__") {
 					actualParamName := strings.TrimPrefix(name, "__header__")
-					params[actualParamName] = value
+					params[actualParamName] = decodedValue
 				} else {
-					params[name] = value
+					params[name] = decodedValue
 				}
 			}
 		}
